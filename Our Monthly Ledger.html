@@ -1,0 +1,457 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Our Monthly Ledger</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one narrow ledger column. Month bar on top, totals, quick-add form, then breakdowns and the day-by-day list. */
+:root {
+  --bg: #F1F4F2;
+  --surface: #FFFFFF;
+  --ink: #15231F;
+  --muted: #5B6C66;
+  --line: #D8E0DC;
+  --a: #0D7A6E;
+  --b: #A33F78;
+  --other: #7A8883;
+  --on-accent: #FFFFFF;
+  --danger: #B3261E;
+  --soft: #E6EDEA;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0E1614; --surface: #15211E; --ink: #E6EFEC; --muted: #94A7A0; --line: #263631;
+    --a: #3FC2B1; --b: #E27BB1; --other: #8A9A95; --on-accent: #08201C; --danger: #F2877F; --soft: #1D2D29;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0E1614; --surface: #15211E; --ink: #E6EFEC; --muted: #94A7A0; --line: #263631;
+  --a: #3FC2B1; --b: #E27BB1; --other: #8A9A95; --on-accent: #08201C; --danger: #F2877F; --soft: #1D2D29;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--body); font-size: 15px; line-height: 1.45;
+  padding-block: 20px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+h1, h2 { font-family: var(--display); font-weight: 700; margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(26px, 5vw, 34px); letter-spacing: -0.02em; line-height: 1.05; }
+h2 { font-size: 17px; letter-spacing: -0.01em; }
+.label { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--a); outline-offset: 2px; }
+
+.top { display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: flex-end; justify-content: space-between; }
+.top .sub { color: var(--muted); margin-top: 6px; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.monthnav { display: flex; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.monthnav button { background: none; border: 0; padding: 8px 12px; cursor: pointer; font-size: 16px; line-height: 1; color: var(--ink); }
+.monthnav .m { min-width: 138px; text-align: center; font-weight: 600; padding: 0 4px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label { padding: 8px 14px; cursor: pointer; font-weight: 600; font-size: 13px; color: var(--muted); }
+.seg input:checked + label { background: var(--a); color: var(--on-accent); }
+.seg input:focus-visible + label { outline: 2px solid var(--a); outline-offset: -2px; }
+
+.banner { padding: 10px 14px; border-radius: 8px; background: var(--soft); color: var(--ink); font-size: 14px; }
+.banner.warn { border: 1px solid var(--danger); }
+
+.summary { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 12px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+.total .big { font-size: clamp(32px, 7vw, 46px); font-weight: 500; letter-spacing: -0.03em; line-height: 1.1; margin-top: 6px; }
+.total .big small { font-size: 15px; color: var(--muted); letter-spacing: 0; margin-left: 6px; }
+.total .delta { margin-top: 8px; color: var(--muted); font-size: 14px; }
+.people { display: flex; flex-direction: column; gap: 12px; }
+.person { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; align-items: baseline; }
+.person .nm { display: flex; align-items: center; gap: 8px; font-weight: 600; min-width: 0; }
+.person .nm span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--other); }
+.person .amt { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.person .track { grid-column: 1 / -1; height: 6px; background: var(--soft); border-radius: 3px; overflow: hidden; }
+.person .track i { display: block; height: 100%; border-radius: 3px; background: var(--other); }
+
+.addcard { display: flex; flex-direction: column; gap: 14px; }
+.addcard .head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.namebox { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+form.add { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; }
+.f { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.f.amount { grid-column: span 5; } .f.cur { grid-column: span 3; } .f.date { grid-column: span 4; }
+.f.cat { grid-column: span 5; } .f.note { grid-column: span 7; }
+.f.submit { grid-column: 1 / -1; flex-direction: row; align-items: center; gap: 12px; flex-wrap: wrap; }
+input[type=text], input[type=number], input[type=date], select {
+  width: 100%; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px;
+}
+input.amt-in { font-family: var(--mono); font-size: 18px; }
+.btn { background: var(--a); color: var(--on-accent); border: 0; border-radius: 8px; padding: 10px 18px; font-weight: 600; cursor: pointer; }
+.btn.ghost { background: none; border: 1px solid var(--line); color: var(--ink); padding: 9px 14px; }
+.btn:disabled { opacity: 0.55; cursor: default; }
+.msg { font-size: 13px; color: var(--muted); }
+.msg.err { color: var(--danger); }
+.rate { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.rate input { width: 74px; padding: 5px 8px; font-family: var(--mono); }
+
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.cats { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.cat { display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; font-size: 14px; }
+.cat .track { grid-column: 1 / -1; height: 6px; background: var(--soft); border-radius: 3px; overflow: hidden; }
+.cat .track i { display: block; height: 100%; background: var(--a); border-radius: 3px; }
+.days { display: flex; align-items: flex-end; gap: 2px; height: 130px; margin-top: 12px; border-bottom: 1px solid var(--line); }
+.day { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
+.day i { display: block; width: 100%; background: var(--other); }
+.day i:first-child { border-radius: 2px 2px 0 0; }
+.ticks { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 4px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+
+.list { padding: 0; }
+.list .hd { padding: 16px 16px 8px; display: flex; justify-content: space-between; align-items: baseline; }
+.dayhead { padding: 8px 16px; background: var(--soft); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; display: flex; justify-content: space-between; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 11px 16px; border-top: 1px solid var(--line); }
+.row:first-of-type { border-top: 0; }
+.row .what { min-width: 0; }
+.row .what b { font-weight: 500; display: block; overflow-wrap: anywhere; }
+.row .what span { font-size: 13px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+.row .money { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.row .money small { display: block; font-size: 12px; color: var(--muted); }
+.del { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 6px 8px; border-radius: 6px; font-size: 13px; }
+.del:hover { color: var(--danger); }
+.del.sure { color: var(--danger); font-weight: 600; }
+.empty { padding: 28px 16px 32px; color: var(--muted); text-align: center; }
+.empty b { display: block; color: var(--ink); font-family: var(--display); font-size: 17px; margin-bottom: 4px; }
+
+@media (max-width: 640px) {
+  .summary, .two { grid-template-columns: minmax(0, 1fr); }
+  .f.amount { grid-column: span 7; } .f.cur { grid-column: span 5; } .f.date { grid-column: span 6; }
+  .f.cat { grid-column: span 6; } .f.note { grid-column: 1 / -1; }
+  .monthnav .m { min-width: 120px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Our Monthly Ledger</h1>
+      <div class="sub">Dubai and Russia, one shared set of books. AED and RUB.</div>
+    </div>
+    <div class="controls">
+      <div class="monthnav" role="group" aria-label="Month">
+        <button type="button" id="prev" aria-label="Previous month">&#8249;</button>
+        <div class="m" id="monthLabel"></div>
+        <button type="button" id="next" aria-label="Next month">&#8250;</button>
+      </div>
+      <div class="seg" role="radiogroup" aria-label="Show totals in">
+        <input type="radio" name="disp" id="disp-AED" value="AED" checked><label for="disp-AED">AED</label>
+        <input type="radio" name="disp" id="disp-RUB" value="RUB"><label for="disp-RUB">RUB</label>
+      </div>
+    </div>
+  </header>
+
+  <div id="banner" class="banner warn" hidden></div>
+
+  <section class="summary" aria-label="Month summary">
+    <div class="card total">
+      <div class="label">Spent in <span id="sumMonth"></span></div>
+      <div class="big num"><span id="totalVal">0</span><small id="totalCur">AED</small></div>
+      <div class="delta" id="delta"></div>
+    </div>
+    <div class="card">
+      <div class="label" style="margin-bottom:12px">Who paid</div>
+      <div class="people" id="people"></div>
+    </div>
+  </section>
+
+  <section class="card addcard" aria-label="Add an expense">
+    <div class="head">
+      <h2>Add an expense</h2>
+      <label class="rate" for="rate">1 AED = <input type="number" id="rate" min="0" step="0.01" inputmode="decimal" value="23"> RUB</label>
+    </div>
+    <div class="namebox" id="nameBox" hidden>
+      <label class="msg" for="myName">What should we call you?</label>
+      <input type="text" id="myName" maxlength="24" style="width:180px" autocomplete="nickname">
+      <button type="button" class="btn ghost" id="saveName">Save name</button>
+    </div>
+    <form class="add" id="addForm" autocomplete="off">
+      <div class="f amount"><label class="label" for="amount">Amount</label><input class="amt-in" type="text" id="amount" inputmode="decimal" placeholder="0.00" required></div>
+      <div class="f cur"><span class="label">Currency</span>
+        <div class="seg" role="radiogroup" aria-label="Currency" style="width:100%">
+          <input type="radio" name="cur" id="cur-AED" value="AED" checked><label for="cur-AED" style="flex:1;text-align:center">AED</label>
+          <input type="radio" name="cur" id="cur-RUB" value="RUB"><label for="cur-RUB" style="flex:1;text-align:center">RUB</label>
+        </div>
+      </div>
+      <div class="f date"><label class="label" for="date">Date</label><input type="date" id="date" required></div>
+      <div class="f cat"><label class="label" for="cat">Category</label><select id="cat"></select></div>
+      <div class="f note"><label class="label" for="note">Note</label><input type="text" id="note" maxlength="80" placeholder="Karak and shawarma, taxi to the metro..."></div>
+      <div class="f submit"><button class="btn" type="submit" id="addBtn">Add expense</button><span class="msg" id="formMsg" role="status"></span></div>
+    </form>
+    <div class="msg" id="readOnly" hidden>You can view this ledger but not add to it. Ask the owner to share it with you as a Contributor.</div>
+  </section>
+
+  <section class="two">
+    <div class="card">
+      <h2>By category</h2>
+      <div class="cats" id="cats"></div>
+    </div>
+    <div class="card">
+      <h2>By day</h2>
+      <div class="days" id="days" aria-label="Spending per day"></div>
+      <div class="ticks" id="ticks"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+  </section>
+
+  <section class="card list" aria-label="All expenses this month">
+    <div class="hd"><h2>Entries</h2><span class="msg" id="count"></span></div>
+    <div id="rows"></div>
+  </section>
+</div>
+
+<script>
+(function () {
+  var CATS = ["Food & groceries", "Eating out", "Transport", "Rent & bills", "Health", "Shopping", "Flights & visits", "Gifts", "Other"];
+  var $ = function (id) { return document.getElementById(id); };
+  var state = { expenses: [], people: {}, rate: 23, month: ym(new Date()), disp: "AED", myId: null, canWrite: null, db: null, peopleLoaded: false, loaded: false };
+
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+  function ym(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1); }
+  function todayStr() { var d = new Date(); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+  function shiftMonth(key, delta) { var p = key.split("-"); return ym(new Date(+p[0], +p[1] - 1 + delta, 1)); }
+  function monthName(key, short) { var p = key.split("-"); return new Date(+p[0], +p[1] - 1, 1).toLocaleDateString("en", short ? { month: "long" } : { month: "long", year: "numeric" }); }
+  function fmt(n, max) { return new Intl.NumberFormat("en", { minimumFractionDigits: 0, maximumFractionDigits: max == null ? 0 : max }).format(n); }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function store(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+
+  var savedDisp = load("ledger-disp");
+  if (savedDisp === "RUB") { state.disp = "RUB"; $("disp-RUB").checked = true; }
+  $("date").value = todayStr();
+  CATS.forEach(function (c) { var o = el("option", null, c); o.value = c; $("cat").appendChild(o); });
+
+  function toAed(e) { return e.currency === "RUB" ? e.amount / state.rate : e.amount; }
+  function inDisp(aed) { return state.disp === "AED" ? aed : aed * state.rate; }
+  function nameOf(id) {
+    var p = state.people[id];
+    if (p && p.name) return p.name;
+    return id === state.myId ? "You" : "Someone";
+  }
+  function personIds() {
+    var s = {};
+    state.expenses.forEach(function (e) { if (e.by) s[e.by] = 1; });
+    Object.keys(state.people).forEach(function (k) { s[k] = 1; });
+    if (state.myId) s[state.myId] = 1;
+    return Object.keys(s).sort();
+  }
+  function colorVar(id) {
+    var i = personIds().indexOf(id);
+    return i === 0 ? "var(--a)" : i === 1 ? "var(--b)" : "var(--other)";
+  }
+  function monthEntries(key) { return state.expenses.filter(function (e) { return e.date && e.date.slice(0, 7) === key; }); }
+  function sumDisp(list) { return inDisp(list.reduce(function (t, e) { return t + toAed(e); }, 0)); }
+
+  function render() {
+    var key = state.month;
+    var list = monthEntries(key);
+    var total = sumDisp(list);
+    $("monthLabel").textContent = monthName(key);
+    $("sumMonth").textContent = monthName(key, true);
+    $("totalVal").textContent = fmt(total);
+    $("totalCur").textContent = state.disp;
+
+    var prev = monthEntries(shiftMonth(key, -1));
+    var d = $("delta");
+    if (!prev.length) d.textContent = "No entries in " + monthName(shiftMonth(key, -1), true) + " to compare with.";
+    else {
+      var pt = sumDisp(prev), diff = total - pt;
+      var pct = pt ? Math.round(Math.abs(diff) / pt * 100) : 0;
+      d.textContent = (diff >= 0 ? "Up " : "Down ") + fmt(Math.abs(diff)) + " " + state.disp + " (" + pct + "%) from " + monthName(shiftMonth(key, -1), true) + ".";
+    }
+
+    // people
+    var pe = $("people"); pe.textContent = "";
+    var ids = personIds();
+    if (!ids.length) pe.appendChild(el("div", "msg", "Nobody has added anything yet."));
+    ids.forEach(function (id) {
+      var mine = list.filter(function (e) { return e.by === id; });
+      var v = sumDisp(mine);
+      var row = el("div", "person");
+      var nm = el("div", "nm"); var dot = el("span", "dot"); dot.style.background = colorVar(id);
+      nm.appendChild(dot); nm.appendChild(el("span", null, nameOf(id)));
+      row.appendChild(nm); row.appendChild(el("div", "amt", fmt(v) + " " + state.disp));
+      var tr = el("div", "track"); var bar = el("i"); bar.style.background = colorVar(id); bar.style.width = (total ? v / total * 100 : 0) + "%";
+      tr.appendChild(bar); row.appendChild(tr); pe.appendChild(row);
+    });
+
+    // categories
+    var ce = $("cats"); ce.textContent = "";
+    var byCat = {};
+    list.forEach(function (e) { byCat[e.category || "Other"] = (byCat[e.category || "Other"] || 0) + toAed(e); });
+    var cats = Object.keys(byCat).sort(function (a, b) { return byCat[b] - byCat[a]; });
+    if (!cats.length) ce.appendChild(el("div", "msg", "Categories appear here once you add expenses."));
+    cats.forEach(function (c) {
+      var v = inDisp(byCat[c]); var row = el("div", "cat");
+      row.appendChild(el("span", null, c)); row.appendChild(el("span", "num", fmt(v) + " " + state.disp));
+      var tr = el("div", "track"); var bar = el("i"); bar.style.width = (total ? v / total * 100 : 0) + "%"; tr.appendChild(bar); row.appendChild(tr);
+      ce.appendChild(row);
+    });
+
+    // days
+    var p = key.split("-"); var nd = new Date(+p[0], +p[1], 0).getDate();
+    var perDay = []; var max = 0;
+    for (var i = 1; i <= nd; i++) perDay.push({});
+    list.forEach(function (e) {
+      var day = parseInt(e.date.slice(8, 10), 10); if (!day || day > nd) return;
+      perDay[day - 1][e.by] = (perDay[day - 1][e.by] || 0) + toAed(e);
+    });
+    perDay.forEach(function (o) { var t = 0; for (var k in o) t += o[k]; o._t = t; if (t > max) max = t; });
+    var de = $("days"); de.textContent = "";
+    perDay.forEach(function (o, idx) {
+      var col = el("div", "day"); col.title = idx + 1 + " " + monthName(key, true) + ": " + fmt(inDisp(o._t)) + " " + state.disp;
+      Object.keys(o).filter(function (k) { return k !== "_t"; }).sort().forEach(function (k) {
+        var seg = el("i"); seg.style.background = colorVar(k); seg.style.height = (max ? o[k] / max * 100 : 0) + "%"; col.appendChild(seg);
+      });
+      de.appendChild(col);
+    });
+    var te = $("ticks"); te.textContent = "";
+    [1, 8, 15, 22, nd].forEach(function (n) { te.appendChild(el("span", null, String(n))); });
+    var le = $("legend"); le.textContent = "";
+    ids.forEach(function (id) {
+      var s = el("span"); var dot = el("span", "dot"); dot.style.background = colorVar(id);
+      s.appendChild(dot); s.appendChild(document.createTextNode(nameOf(id))); le.appendChild(s);
+    });
+
+    // entries
+    var re = $("rows"); re.textContent = "";
+    $("count").textContent = list.length ? list.length + (list.length === 1 ? " entry" : " entries") : "";
+    if (!list.length) {
+      var em = el("div", "empty"); em.appendChild(el("b", null, "Nothing recorded for " + monthName(key, true) + " yet"));
+      em.appendChild(document.createTextNode(state.canWrite === false ? "Entries from both of you will show here." : "Add the first expense above. You both see the same list as soon as it is saved."));
+      re.appendChild(em);
+    } else {
+      var sorted = list.slice().sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : (b.created || 0) - (a.created || 0); });
+      var lastDate = null;
+      sorted.forEach(function (e) {
+        if (e.date !== lastDate) {
+          lastDate = e.date;
+          var dd = new Date(+e.date.slice(0, 4), +e.date.slice(5, 7) - 1, +e.date.slice(8, 10));
+          var dayTotal = sumDisp(sorted.filter(function (x) { return x.date === e.date; }));
+          var hd = el("div", "dayhead"); hd.appendChild(el("span", null, dd.toLocaleDateString("en", { weekday: "short", day: "numeric", month: "short" })));
+          hd.appendChild(el("span", "num", fmt(dayTotal) + " " + state.disp)); re.appendChild(hd);
+        }
+        var row = el("div", "row");
+        var what = el("div", "what"); what.appendChild(el("b", null, e.note || e.category || "Expense"));
+        var meta = el("span"); var dot = el("span", "dot"); dot.style.background = colorVar(e.by);
+        meta.appendChild(dot); meta.appendChild(document.createTextNode(nameOf(e.by) + " · " + (e.category || "Other"))); what.appendChild(meta);
+        row.appendChild(what);
+        var money = el("div", "money", fmt(e.amount, 2) + " " + e.currency);
+        if (e.currency !== state.disp) money.appendChild(el("small", null, "≈ " + fmt(inDisp(toAed(e))) + " " + state.disp));
+        row.appendChild(money);
+        var del = el("button", "del", "Delete"); del.type = "button";
+        if (state.canWrite === false) del.hidden = true;
+        del.addEventListener("click", function () { onDelete(e, del); });
+        row.appendChild(del); re.appendChild(row);
+      });
+    }
+
+    $("addForm").hidden = state.canWrite === false || !state.db;
+    $("readOnly").hidden = state.canWrite !== false;
+    $("nameBox").hidden = !(state.db && state.myId && state.peopleLoaded && !(state.people[state.myId] && state.people[state.myId].name) && state.canWrite !== false);
+  }
+
+  function showBanner(t) { var b = $("banner"); b.textContent = t; b.hidden = !t; }
+  function onErr(e) {
+    var c = e && e.code;
+    if (c === "quota_exceeded") return "The ledger is full. Delete some old entries and try again.";
+    if (c === "invalid_argument") return "This view is not allowed to change the ledger.";
+    return "That did not save. Check your connection and try again.";
+  }
+
+  var pending = {};
+  function onDelete(e, btn) {
+    if (!pending[e.id]) {
+      pending[e.id] = setTimeout(function () { delete pending[e.id]; btn.textContent = "Delete"; btn.classList.remove("sure"); }, 3500);
+      btn.textContent = "Confirm"; btn.classList.add("sure"); return;
+    }
+    clearTimeout(pending[e.id]); delete pending[e.id];
+    state.db.doc("expenses/" + e.id).delete().catch(function (er) { showBanner(onErr(er)); });
+  }
+
+  $("prev").addEventListener("click", function () { state.month = shiftMonth(state.month, -1); render(); });
+  $("next").addEventListener("click", function () { state.month = shiftMonth(state.month, 1); render(); });
+  document.querySelectorAll('input[name="disp"]').forEach(function (r) {
+    r.addEventListener("change", function () { state.disp = r.value; store("ledger-disp", r.value); render(); });
+  });
+
+  $("addForm").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var msg = $("formMsg"); msg.className = "msg"; msg.textContent = "";
+    var raw = $("amount").value.trim().replace(/\s/g, "").replace(",", ".");
+    var amount = parseFloat(raw);
+    if (!isFinite(amount) || amount <= 0) { msg.className = "msg err"; msg.textContent = "Enter an amount greater than zero."; return; }
+    if (!$("date").value) { msg.className = "msg err"; msg.textContent = "Pick a date."; return; }
+    if (!state.db) { msg.className = "msg err"; msg.textContent = "Saving is not available in this view."; return; }
+    var cur = document.querySelector('input[name="cur"]:checked').value;
+    var data = {
+      amount: Math.round(amount * 100) / 100, currency: cur, category: $("cat").value,
+      note: $("note").value.trim(), date: $("date").value, by: state.myId || "", created: Date.now()
+    };
+    var btn = $("addBtn"); btn.disabled = true;
+    state.db.collection("expenses").add(data).then(function () {
+      $("amount").value = ""; $("note").value = ""; msg.textContent = "Saved.";
+      var k = data.date.slice(0, 7); if (k !== state.month) { state.month = k; render(); }
+      $("amount").focus();
+    }).catch(function (er) { msg.className = "msg err"; msg.textContent = onErr(er); })
+      .then(function () { btn.disabled = false; });
+  });
+
+  $("saveName").addEventListener("click", function () {
+    var n = $("myName").value.trim(); if (!n || !state.db || !state.myId) return;
+    state.db.doc("people/" + state.myId).set({ name: n }).catch(function (er) { showBanner(onErr(er)); });
+  });
+
+  $("rate").addEventListener("change", function () {
+    var v = parseFloat($("rate").value);
+    if (!isFinite(v) || v <= 0) { $("rate").value = state.rate; return; }
+    if (state.db && state.canWrite !== false) state.db.doc("settings/rate").set({ rubPerAed: v }).catch(function (er) { showBanner(onErr(er)); });
+    else { state.rate = v; render(); }
+  });
+
+  async function init() {
+    render();
+    var api = window.claude && window.claude.use ? window.claude : null;
+    var db = null, user = null;
+    if (api) { try { db = await api.use("db"); } catch (e) { db = null; } try { user = await api.use("user"); } catch (e) { user = null; } }
+    if (!db) { showBanner("Saving is not available in this view. Open the shared link while signed in to add expenses."); render(); return; }
+    state.db = db;
+    if (user) { try { state.myId = await user.id(); } catch (e) {} try { state.canWrite = await user.can("data.write"); } catch (e) {} }
+
+    var timer = setTimeout(function () { if (!state.loaded) showBanner("The ledger is taking a while to load. What you see may be out of date."); }, 10000);
+    db.collection("expenses").onSnapshot(function (snap) {
+      state.expenses = snap.docs.map(function (d) { var x = d.data() || {}; x.id = d.id; return x; })
+        .filter(function (x) { return typeof x.amount === "number" && x.date; });
+      if (!snap.metadata.fromCache) { state.loaded = true; clearTimeout(timer); if ($("banner").textContent.indexOf("taking a while") > -1) showBanner(""); }
+      render();
+    }, function (e) { clearTimeout(timer); showBanner("Could not read the ledger (" + ((e && e.code) || "error") + ")."); });
+    db.collection("people").onSnapshot(function (snap) {
+      var m = {}; snap.docs.forEach(function (d) { m[d.id] = d.data() || {}; });
+      state.people = m; state.peopleLoaded = true; render();
+    }, function () { state.peopleLoaded = true; render(); });
+    db.doc("settings/rate").onSnapshot(function (snap) {
+      var d = snap.exists ? snap.data() : null;
+      if (d && d.rubPerAed > 0) { state.rate = d.rubPerAed; $("rate").value = d.rubPerAed; }
+      render();
+    }, function () {});
+  }
+  init();
+})();
+</script>
+
+</body></html>
