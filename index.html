@@ -169,6 +169,13 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
 .bud .track i{display:block;height:100%;background:var(--a)}
 .bud .st{font-size:12px;color:var(--muted)}
 .bud .st.over{color:var(--danger);font-weight:600}
+.mbrow{display:flex;gap:8px;align-items:center;margin-top:6px}
+.mbrow input{width:150px;font-family:var(--mono);padding:7px 10px;background:var(--bg);border:1px solid var(--line);border-radius:8px}
+.mbout{margin-top:10px}
+.mbout .left{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:22px;font-weight:500}
+.mbout .left.neg{color:var(--danger)}
+.mbout .track{height:8px;background:var(--soft);border-radius:4px;overflow:hidden;margin:8px 0 6px}
+.mbout .track i{display:block;height:100%;background:var(--a)}
 @media (max-width: 640px) {
   .summary, .two { grid-template-columns: minmax(0, 1fr); }
   .f.amount { grid-column: span 7; } .f.cur { grid-column: span 5; } .f.date { grid-column: span 6; }
@@ -211,6 +218,9 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
       <div class="label">Spent in <span id="sumMonth"></span></div>
       <div class="big num"><span id="totalVal">0</span><small id="totalCur">AED</small></div>
       <div class="delta" id="delta"></div>
+      <div class="label" style="margin-top:16px">Monthly budget</div>
+      <div class="mbrow"><input type="number" id="mbInput" min="0" step="1" inputmode="decimal" placeholder="Set amount" aria-label="Monthly budget in AED"><span class="msg">AED per month</span></div>
+      <div class="mbout" id="mbOut"></div>
     </div>
     <div class="card">
       <div class="label" style="margin-bottom:12px">Who paid</div>
@@ -240,7 +250,7 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
       <div class="f date"><label class="label" for="date">Date</label><input type="date" id="date" required></div>
       <div class="f cat"><label class="label" for="cat">Category</label><select id="cat"></select></div>
       <div class="f note"><label class="label" for="note">Note</label><input type="text" id="note" maxlength="80" placeholder="Karak and shawarma, taxi to the metro..."></div>
-      <div class="f submit"><button class="btn" type="submit" id="addBtn">Add expense</button><button class="btn ghost" type="button" id="cancelEdit" hidden>Cancel edit</button><span class="msg" id="formMsg" role="status"></span></div>
+      <div class="f submit"><button class="btn" type="submit" id="addBtn">Add expense</button><button class="btn ghost" type="button" id="cancelEdit" hidden>Cancel edit</button><button class="btn ghost" type="button" id="clearForm">Clear form</button><span class="msg" id="formMsg" role="status"></span></div>
     </form>
     <div class="msg" id="readOnly" hidden>You can view this ledger but not add to it. Ask the owner to share it with you as a Contributor.</div>
   </section>
@@ -267,7 +277,7 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
 
   <section class="card list" aria-label="All expenses this month">
     <div class="hd"><h2>Entries</h2><span class="msg" id="count"></span></div>
-    <div class="tools"><input type="search" id="search" placeholder="Search notes, people, amounts (all months)" aria-label="Search entries"><button type="button" class="btn ghost" id="csvBtn" title="Exports the entries currently listed">Export CSV</button></div>
+    <div class="tools"><input type="search" id="search" placeholder="Search notes, people, amounts (all months)" aria-label="Search entries"><button type="button" class="btn ghost" id="csvBtn" title="Detailed monthly report with tables and totals">Export Word report</button><button type="button" class="btn ghost del" id="clearAll" hidden></button></div>
     <div class="chips" id="whoFilter" role="group" aria-label="Show entries by person"></div>
     <div id="rows"></div>
   </section>
@@ -296,7 +306,7 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
 (function () {
   var CATS = ["Food & groceries", "Eating out", "Transport", "Rent & bills", "Health", "Shopping", "Flights & visits", "Gifts", "Other"];
   var $ = function (id) { return document.getElementById(id); };
-  var state = { budgets: {}, editId: null, q: "", shown: [], expenses: [], people: {}, rate: 23, month: ym(new Date()), disp: "AED", myId: null, canWrite: null, db: null, peopleLoaded: false, loaded: false, tab: "ledger", dl: null, who: "all" };
+  var state = { mb: 0, budgets: {}, editId: null, q: "", shown: [], expenses: [], people: {}, rate: 23, month: ym(new Date()), disp: "AED", myId: null, canWrite: null, db: null, peopleLoaded: false, loaded: false, tab: "ledger", dl: null, who: "all" };
 
   function pad(n) { return (n < 10 ? "0" : "") + n; }
   function ym(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1); }
@@ -781,22 +791,37 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
       .then(function () { btn.disabled = false; });
   }
   $("cancelEdit").addEventListener("click", endEdit);
+  $("clearForm").addEventListener("click", function () { endEdit(); $("formMsg").className = "msg"; $("amount").focus(); });
+  $("mbInput").addEventListener("change", function () {
+    var v = parseFloat($("mbInput").value);
+    if (state.db) state.db.doc("settings/monthly").set({ aed: isFinite(v) && v > 0 ? v : 0 }).catch(function (er) { showBanner(onErr(er)); });
+    $("mbInput").blur();
+  });
+  var clearTimer = null;
+  $("clearAll").addEventListener("click", function () {
+    var list = (state.shown || []).slice(), b = $("clearAll");
+    if (!list.length || !state.db) return;
+    if (!clearTimer) {
+      b.textContent = "Tap again to delete " + list.length + (list.length === 1 ? " entry" : " entries"); b.classList.add("sure");
+      clearTimer = setTimeout(function () { clearTimer = null; b.classList.remove("sure"); render(); }, 4000); return;
+    }
+    clearTimeout(clearTimer); clearTimer = null; b.classList.remove("sure");
+    Promise.all(list.map(function (e) { return state.db.doc("expenses/" + e.id).delete(); }))
+      .catch(function (er) { showBanner(onErr(er)); });
+  });
   $("search").addEventListener("input", function () { state.q = this.value.trim().toLowerCase(); render(); });
 
   $("csvBtn").addEventListener("click", async function () {
-    var rows = state.shown || [];
-    if (!rows.length) { $("count").textContent = "Nothing to export"; return; }
-    function q(v) { v = String(v == null ? "" : v); if (/^[=+\-@]/.test(v)) v = "'" + v; return '"' + v.replace(/"/g, '""') + '"'; }
-    var lines = ["Date,Who,Category,Note,Amount,Currency,AED,RUB"];
-    rows.slice().sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; }).forEach(function (e) {
-      lines.push([q(e.date), q(nameOf(e.by)), q(e.category || "Other"), q(e.note), e.amount, q(e.currency), toAed(e).toFixed(2), (toAed(e) * state.rate).toFixed(2)].join(","));
-    });
-    var blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
-    var fname = "ledger-" + (state.q ? "search" : state.month) + ".csv";
+    var btn = $("csvBtn"), cnt = $("count");
+    if (!monthEntries(state.month).length) { cnt.textContent = "No entries this month to report"; return; }
+    if (!window.JSZip) { cnt.textContent = "Word export could not load. Check your connection."; return; }
+    btn.disabled = true;
     try {
+      var blob = await buildDocx(reportData(state.month)), fname = "Expense-report-" + state.month + ".docx";
       if (state.dl) await state.dl.save({ filename: fname, data: blob });
       else { var u = URL.createObjectURL(blob), a = document.createElement("a"); a.href = u; a.download = fname; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 4000); }
-    } catch (er) {}
+    } catch (er) { if (!(er && er.code === "declined")) cnt.textContent = "The Word file could not be saved here."; }
+    btn.disabled = false;
   });
 
   function saveBudget(c, v) {
@@ -807,6 +832,26 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
   }
 
   function renderExtras(list) {
+    var mbi = $("mbInput");
+    if (document.activeElement !== mbi) mbi.value = state.mb || "";
+    mbi.disabled = state.canWrite === false || !state.db;
+    var mo = $("mbOut"); mo.textContent = "";
+    if (state.mb > 0) {
+      var spA = list.reduce(function (t, e) { return t + toAed(e); }, 0), left = state.mb - spA;
+      var lv = el("div", "left num" + (left < 0 ? " neg" : ""), (left < 0 ? "-" : "") + fmt(Math.abs(inDisp(left))) + " " + state.disp);
+      mo.appendChild(lv);
+      var tr = el("div", "track"), bar = el("i"); bar.style.width = Math.min(100, spA / state.mb * 100) + "%";
+      if (left < 0) bar.style.background = "var(--danger)"; tr.appendChild(bar); mo.appendChild(tr);
+      var info = left < 0 ? "Over the monthly budget by " + fmt(inDisp(-left)) + " " + state.disp + "." : "Remaining of " + fmt(inDisp(state.mb)) + " " + state.disp + ", after " + fmt(inDisp(spA)) + " spent.";
+      if (left > 0 && state.month === ym(new Date())) {
+        var now = new Date(), dl = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate() - now.getDate() + 1;
+        info += " About " + fmt(inDisp(left / dl)) + " " + state.disp + " a day for the " + dl + " days left.";
+      }
+      mo.appendChild(el("div", "msg", info));
+    } else mo.appendChild(el("div", "msg", "Enter your monthly amount and the remaining balance will drop with every expense."));
+    var ca = $("clearAll"), n0 = (state.shown || []).length;
+    ca.hidden = state.canWrite === false || !state.db || !n0;
+    if (!clearTimer) ca.textContent = "Delete all listed (" + n0 + ")";
     var ids = personIds(), paid = {}, total = 0;
     ids.forEach(function (id) { paid[id] = 0; });
     list.forEach(function (e) { if (e.by in paid) { var v = toAed(e); paid[e.by] += v; total += v; } });
@@ -890,8 +935,7 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
     var db = null, user = null;
     if (api) { try { db = await api.use("db"); } catch (e) { db = null; } try { user = await api.use("user"); } catch (e) { user = null; } try { state.dl = await api.use("downloads"); } catch (e) { state.dl = null; } }
     var localOnly = false;
-    if (!db) { db = localDb(); localOnly = true; state.myId = "me"; state.canWrite = true; state.local = true;
-      showBanner("Shared saving is not available here, so entries are kept only in this browser. Open the page from your claude.ai artifacts while signed in to share it with your partner."); }
+    if (!db) { db = localDb(); localOnly = true; state.myId = "me"; state.canWrite = true; state.local = true; }
     state.db = db;
     if (user && !localOnly) { try { state.myId = await user.id(); } catch (e) {} try { state.canWrite = await user.can("data.write"); } catch (e) {} }
 
@@ -906,6 +950,9 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
       var m = {}; snap.docs.forEach(function (d) { m[d.id] = d.data() || {}; });
       state.people = m; state.peopleLoaded = true; render();
     }, function () { state.peopleLoaded = true; render(); });
+    db.doc("settings/monthly").onSnapshot(function (snap) {
+      var d = snap.exists ? snap.data() : null; state.mb = d && d.aed > 0 ? d.aed : 0; render();
+    }, function () {});
     db.doc("settings/budgets").onSnapshot(function (snap) {
       var d = snap.exists ? snap.data() : null, m = {};
       ((d && d.list) || []).forEach(function (x) { if (x && x.c && x.v > 0) m[x.c] = x.v; });
