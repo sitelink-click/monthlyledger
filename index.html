@@ -129,6 +129,22 @@ input.amt-in { font-family: var(--mono); font-size: 18px; }
 .empty { padding: 28px 16px 32px; color: var(--muted); text-align: center; }
 .empty b { display: block; color: var(--ink); font-family: var(--display); font-size: 17px; margin-bottom: 4px; }
 
+.pcard { display: flex; flex-direction: column; gap: 12px; }
+.pcard .ph { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.pcard .pn { display: flex; align-items: center; gap: 8px; }
+.pcard .ptotal { font-size: clamp(22px, 5vw, 30px); font-weight: 500; letter-spacing: -0.02em; }
+.pcard .pcats { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--muted); }
+.pcard .pcats b { color: var(--ink); font-weight: 600; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.prow { display: grid; grid-template-columns: 74px minmax(0, 1fr) auto; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); align-items: baseline; font-size: 14px; }
+.prow .d { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.prow .w { min-width: 0; overflow-wrap: anywhere; }
+.prow .w small { display: block; color: var(--muted); font-size: 12px; }
+.prow .a { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.prow.tot { font-weight: 600; background: var(--soft); padding-inline: 10px; border-radius: 6px; border-top: 0; margin-top: 4px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 12px; }
+.chips:empty { display: none; }
+.chip { background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-weight: 600; font-size: 13px; color: var(--muted); cursor: pointer; }
+.chip.on { background: var(--a); border-color: var(--a); color: var(--on-accent); }
 .stack { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); }
 .tab { background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 10px 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
@@ -195,10 +211,11 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size:
       <h2>Add an expense</h2>
       <label class="rate" for="rate">1 AED = <input type="number" id="rate" min="0" step="0.01" inputmode="decimal" value="23"> RUB</label>
     </div>
-    <div class="namebox" id="nameBox" hidden>
-      <label class="msg" for="myName">What should we call you?</label>
-      <input type="text" id="myName" maxlength="24" style="width:180px" autocomplete="nickname">
+    <div class="namebox" id="nameBox">
+      <label class="label" for="myName">Your name</label>
+      <input type="text" id="myName" maxlength="24" style="width:180px" autocomplete="nickname" placeholder="e.g. Anfal or Mufeeda">
       <button type="button" class="btn ghost" id="saveName">Save name</button>
+      <span class="msg">Every expense you add is recorded under this name.</span>
     </div>
     <form class="add" id="addForm" autocomplete="off">
       <div class="f amount"><label class="label" for="amount">Amount</label><input class="amt-in" type="text" id="amount" inputmode="decimal" placeholder="0.00" required></div>
@@ -229,8 +246,11 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size:
     </div>
   </section>
 
+  <section class="stack" id="personCards" aria-label="Expenses by person"></section>
+
   <section class="card list" aria-label="All expenses this month">
     <div class="hd"><h2>Entries</h2><span class="msg" id="count"></span></div>
+    <div class="chips" id="whoFilter" role="group" aria-label="Show entries by person"></div>
     <div id="rows"></div>
   </section>
 
@@ -258,7 +278,7 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size:
 (function () {
   var CATS = ["Food & groceries", "Eating out", "Transport", "Rent & bills", "Health", "Shopping", "Flights & visits", "Gifts", "Other"];
   var $ = function (id) { return document.getElementById(id); };
-  var state = { expenses: [], people: {}, rate: 23, month: ym(new Date()), disp: "AED", myId: null, canWrite: null, db: null, peopleLoaded: false, loaded: false, tab: "ledger", dl: null };
+  var state = { expenses: [], people: {}, rate: 23, month: ym(new Date()), disp: "AED", myId: null, canWrite: null, db: null, peopleLoaded: false, loaded: false, tab: "ledger", dl: null, who: "all" };
 
   function pad(n) { return (n < 10 ? "0" : "") + n; }
   function ym(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1); }
@@ -280,6 +300,7 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size:
   function nameOf(id) {
     var p = state.people[id];
     if (p && p.name) return p.name;
+    for (var i = state.expenses.length - 1; i >= 0; i--) { if (state.expenses[i].by === id && state.expenses[i].byName) return state.expenses[i].byName; }
     return id === state.myId ? "You" : "Someone";
   }
   function personIds() {
@@ -368,14 +389,23 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size:
     });
 
     // entries
+    var wf = $("whoFilter"); wf.textContent = "";
+    if (state.who !== "all" && ids.indexOf(state.who) < 0) state.who = "all";
+    if (ids.length > 1) {
+      [["all", "Everyone"]].concat(ids.map(function (id) { return [id, nameOf(id)]; })).forEach(function (o) {
+        var b = el("button", "chip" + (state.who === o[0] ? " on" : ""), o[1]); b.type = "button";
+        b.addEventListener("click", function () { state.who = o[0]; render(); }); wf.appendChild(b);
+      });
+    }
+    var shown = state.who === "all" ? list : list.filter(function (e) { return e.by === state.who; });
     var re = $("rows"); re.textContent = "";
-    $("count").textContent = list.length ? list.length + (list.length === 1 ? " entry" : " entries") : "";
-    if (!list.length) {
+    $("count").textContent = shown.length ? shown.length + (shown.length === 1 ? " entry" : " entries") : "";
+    if (!shown.length) {
       var em = el("div", "empty"); em.appendChild(el("b", null, "Nothing recorded for " + monthName(key, true) + " yet"));
       em.appendChild(document.createTextNode(state.canWrite === false ? "Entries from both of you will show here." : "Add the first expense above. You both see the same list as soon as it is saved."));
       re.appendChild(em);
     } else {
-      var sorted = list.slice().sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : (b.created || 0) - (a.created || 0); });
+      var sorted = shown.slice().sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : (b.created || 0) - (a.created || 0); });
       var lastDate = null;
       sorted.forEach(function (e) {
         if (e.date !== lastDate) {
@@ -400,11 +430,42 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size:
       });
     }
 
+    var pc = $("personCards"); pc.textContent = "";
+    ids.forEach(function (id) {
+      var mineL = list.filter(function (e) { return e.by === id; });
+      if (!mineL.length) return;
+      var v = sumDisp(mineL);
+      var card = el("div", "card pcard");
+      var ph = el("div", "ph");
+      var pn = el("h2", "pn"); var dot = el("span", "dot"); dot.style.background = colorVar(id);
+      pn.appendChild(dot); pn.appendChild(document.createTextNode(nameOf(id))); ph.appendChild(pn);
+      ph.appendChild(el("div", "ptotal", fmt(v) + " " + state.disp)); card.appendChild(ph);
+      card.appendChild(el("div", "msg", "Total so far in " + monthName(key, true) + ": " + mineL.length + (mineL.length === 1 ? " entry" : " entries") + ", " + (total ? Math.round(sumDisp(mineL) / total * 100) : 0) + "% of all spending."));
+      var cm = {}; mineL.forEach(function (e) { var k = e.category || "Other"; cm[k] = (cm[k] || 0) + toAed(e); });
+      var pcats = el("div", "pcats");
+      Object.keys(cm).sort(function (a, b) { return cm[b] - cm[a]; }).forEach(function (k) {
+        var s = el("span", null, k + " "); s.appendChild(el("b", null, fmt(inDisp(cm[k])))); pcats.appendChild(s);
+      });
+      card.appendChild(pcats);
+      var body = el("div");
+      mineL.slice().sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : (b.created || 0) - (a.created || 0); }).forEach(function (e) {
+        var r = el("div", "prow");
+        r.appendChild(el("span", "d", e.date.slice(8, 10) + " " + monthName(e.date.slice(0, 7), true).slice(0, 3)));
+        var w = el("span", "w", e.note || e.category || "Expense"); w.appendChild(el("small", null, e.category || "Other")); r.appendChild(w);
+        r.appendChild(el("span", "a", fmt(e.amount, 2) + " " + e.currency));
+        body.appendChild(r);
+      });
+      var tr = el("div", "prow tot"); tr.appendChild(el("span", "d", "Total")); tr.appendChild(el("span", "w", "")); tr.appendChild(el("span", "a", fmt(v) + " " + state.disp));
+      body.appendChild(tr); card.appendChild(body); pc.appendChild(card);
+    });
+
     $("addForm").hidden = state.canWrite === false || !state.db;
     $("readOnly").hidden = state.canWrite !== false;
     renderTabs();
     if (state.tab === "report") renderReport();
-    $("nameBox").hidden = !(state.db && state.myId && state.peopleLoaded && !(state.people[state.myId] && state.people[state.myId].name) && state.canWrite !== false);
+    $("nameBox").hidden = !(state.db && state.myId && state.canWrite !== false);
+    var mine = state.people[state.myId];
+    if (mine && mine.name && document.activeElement !== $("myName") && !$("myName").value) $("myName").value = mine.name;
   }
 
   function showBanner(t) { var b = $("banner"); b.textContent = t; b.hidden = !t; }
@@ -439,11 +500,15 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size:
     if (!isFinite(amount) || amount <= 0) { msg.className = "msg err"; msg.textContent = "Enter an amount greater than zero."; return; }
     if (!$("date").value) { msg.className = "msg err"; msg.textContent = "Pick a date."; return; }
     if (!state.db) { msg.className = "msg err"; msg.textContent = "Saving is not available in this view."; return; }
+    var who = $("myName").value.trim();
+    if (!who) { msg.className = "msg err"; msg.textContent = "Type your name first (for example Anfal or Mufeeda) so this expense is recorded under you."; $("myName").focus(); return; }
     var cur = document.querySelector('input[name="cur"]:checked').value;
     var data = {
       amount: Math.round(amount * 100) / 100, currency: cur, category: $("cat").value,
-      note: $("note").value.trim(), date: $("date").value, by: state.myId || "", created: Date.now()
+      note: $("note").value.trim(), date: $("date").value, by: state.myId || "", byName: who, created: Date.now()
     };
+    var known = state.people[state.myId];
+    if (state.myId && (!known || known.name !== who)) state.db.doc("people/" + state.myId).set({ name: who }).catch(function () {});
     var btn = $("addBtn"); btn.disabled = true;
     state.db.collection("expenses").add(data).then(function () {
       $("amount").value = ""; $("note").value = ""; msg.textContent = "Saved.";
@@ -517,6 +582,19 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size:
       return rows;
     };
     tables.push({ heading: "By person", cols: cols5("Person"), rows: group(function (e) { return e.by || ""; }, function (k) { return nameOf(k); }), boldLast: true });
+    var pids = []; list.forEach(function (e) { if (pids.indexOf(e.by) < 0) pids.push(e.by); });
+    pids.sort(function (a, b) { return nameOf(a) < nameOf(b) ? -1 : 1; });
+    pids.forEach(function (pid) {
+      var mine = list.filter(function (e) { return e.by === pid; }), mt = sumA(mine), nm = nameOf(pid);
+      var cm = {}; mine.forEach(function (e) { var k = e.category || "Other"; (cm[k] = cm[k] || []).push(e); });
+      var ck = Object.keys(cm).sort(function (a, b) { return sumA(cm[b]) - sumA(cm[a]); });
+      var crow = ck.map(function (k) { var v = sumA(cm[k]); return [k, String(cm[k].length), two(v), two(v * rate), mt ? (v / mt * 100).toFixed(1) + "%" : "0%"]; });
+      crow.push(["Total", String(mine.length), two(mt), two(mt * rate), "100%"]);
+      tables.push({ heading: nm + ": by category", cols: cols5("Category"), rows: crow, boldLast: true });
+      var erow = mine.map(function (e) { return [dfmt(e.date), e.category || "Other", e.note || "", two(e.amount) + " " + e.currency, two(toAed(e)), two(toAed(e) * rate)]; });
+      erow.push(["Total", "", "", "", two(mt), two(mt * rate)]);
+      tables.push({ heading: nm + ": all entries", cols: [{ h: "Date", w: 0.13 }, { h: "Category", w: 0.2 }, { h: "Note", w: 0.31 }, { h: "Paid", w: 0.14, r: true }, { h: "AED", w: 0.11, r: true }, { h: "RUB", w: 0.11, r: true }], rows: erow, boldLast: true });
+    });
     tables.push({ heading: "By category", cols: cols5("Category"), rows: group(function (e) { return e.category || "Other"; }, function (k) { return k; }), boldLast: true });
 
     var dayRows = dayKeys.map(function (d) { var v = sumA(byDay[d]); return [dfmt(d), String(byDay[d].length), two(v), two(v * rate)]; });
