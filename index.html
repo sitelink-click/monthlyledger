@@ -1,5 +1,4 @@
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"></head><body style="margin:0">
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <title>Our Monthly Ledger</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -157,6 +156,19 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size:
 .tbl td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
 .tbl .r { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .tbl tr.tot td { font-weight: 600; background: var(--soft); }
+
+.tools{display:flex;gap:10px;flex-wrap:wrap;padding:0 16px 12px}
+input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 11px}
+.acts{display:flex;align-items:center}
+.del.edit:hover{color:var(--a)}
+.owe{display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:9px 0;border-top:1px solid var(--line)}
+.bud{display:flex;flex-direction:column;gap:4px;margin-top:12px}
+.bud .bt{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:14px}
+.bud input{width:96px;font-family:var(--mono);text-align:right;padding:5px 8px;background:var(--bg);border:1px solid var(--line);border-radius:8px}
+.bud .track{height:6px;background:var(--soft);border-radius:3px;overflow:hidden}
+.bud .track i{display:block;height:100%;background:var(--a)}
+.bud .st{font-size:12px;color:var(--muted)}
+.bud .st.over{color:var(--danger);font-weight:600}
 @media (max-width: 640px) {
   .summary, .two { grid-template-columns: minmax(0, 1fr); }
   .f.amount { grid-column: span 7; } .f.cur { grid-column: span 5; } .f.date { grid-column: span 6; }
@@ -228,7 +240,7 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size:
       <div class="f date"><label class="label" for="date">Date</label><input type="date" id="date" required></div>
       <div class="f cat"><label class="label" for="cat">Category</label><select id="cat"></select></div>
       <div class="f note"><label class="label" for="note">Note</label><input type="text" id="note" maxlength="80" placeholder="Karak and shawarma, taxi to the metro..."></div>
-      <div class="f submit"><button class="btn" type="submit" id="addBtn">Add expense</button><span class="msg" id="formMsg" role="status"></span></div>
+      <div class="f submit"><button class="btn" type="submit" id="addBtn">Add expense</button><button class="btn ghost" type="button" id="cancelEdit" hidden>Cancel edit</button><span class="msg" id="formMsg" role="status"></span></div>
     </form>
     <div class="msg" id="readOnly" hidden>You can view this ledger but not add to it. Ask the owner to share it with you as a Contributor.</div>
   </section>
@@ -246,10 +258,16 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size:
     </div>
   </section>
 
+  <section class="two" aria-label="Settle up and budgets">
+    <div class="card"><h2>Settle up</h2><div id="settle" style="margin-top:8px"></div><div class="msg" style="margin-top:10px">Assumes every expense this month is shared equally.</div></div>
+    <div class="card"><h2>Category budgets</h2><div class="msg" id="budWarn"></div><div class="msg">Monthly limit in AED. Leave empty for no limit.</div><div id="budgets"></div></div>
+  </section>
+
   <section class="stack" id="personCards" aria-label="Expenses by person"></section>
 
   <section class="card list" aria-label="All expenses this month">
     <div class="hd"><h2>Entries</h2><span class="msg" id="count"></span></div>
+    <div class="tools"><input type="search" id="search" placeholder="Search notes, people, amounts (all months)" aria-label="Search entries"><button type="button" class="btn ghost" id="csvBtn" title="Exports the entries currently listed">Export CSV</button></div>
     <div class="chips" id="whoFilter" role="group" aria-label="Show entries by person"></div>
     <div id="rows"></div>
   </section>
@@ -278,7 +296,7 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size:
 (function () {
   var CATS = ["Food & groceries", "Eating out", "Transport", "Rent & bills", "Health", "Shopping", "Flights & visits", "Gifts", "Other"];
   var $ = function (id) { return document.getElementById(id); };
-  var state = { expenses: [], people: {}, rate: 23, month: ym(new Date()), disp: "AED", myId: null, canWrite: null, db: null, peopleLoaded: false, loaded: false, tab: "ledger", dl: null, who: "all" };
+  var state = { budgets: {}, editId: null, q: "", shown: [], expenses: [], people: {}, rate: 23, month: ym(new Date()), disp: "AED", myId: null, canWrite: null, db: null, peopleLoaded: false, loaded: false, tab: "ledger", dl: null, who: "all" };
 
   function pad(n) { return (n < 10 ? "0" : "") + n; }
   function ym(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1); }
@@ -397,11 +415,14 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size:
         b.addEventListener("click", function () { state.who = o[0]; render(); }); wf.appendChild(b);
       });
     }
-    var shown = state.who === "all" ? list : list.filter(function (e) { return e.by === state.who; });
+    var base = state.q ? state.expenses.filter(function (e) { return e.date; }) : list;
+    var shown = state.who === "all" ? base : base.filter(function (e) { return e.by === state.who; });
+    if (state.q) shown = shown.filter(function (e) { return [e.note, e.category, nameOf(e.by), e.date, e.amount, e.currency].join(" ").toLowerCase().indexOf(state.q) > -1; });
+    state.shown = shown;
     var re = $("rows"); re.textContent = "";
     $("count").textContent = shown.length ? shown.length + (shown.length === 1 ? " entry" : " entries") : "";
     if (!shown.length) {
-      var em = el("div", "empty"); em.appendChild(el("b", null, "Nothing recorded for " + monthName(key, true) + " yet"));
+      var em = el("div", "empty"); em.appendChild(el("b", null, (state.q ? "No entries match your search" : "Nothing recorded for " + monthName(key, true) + " yet")));
       em.appendChild(document.createTextNode(state.canWrite === false ? "Entries from both of you will show here." : "Add the first expense above. You both see the same list as soon as it is saved."));
       re.appendChild(em);
     } else {
@@ -426,7 +447,11 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size:
         var del = el("button", "del", "Delete"); del.type = "button";
         if (state.canWrite === false) del.hidden = true;
         del.addEventListener("click", function () { onDelete(e, del); });
-        row.appendChild(del); re.appendChild(row);
+        var acts = el("div", "acts");
+        var ed = el("button", "del edit", "Edit"); ed.type = "button";
+        if (state.canWrite === false) ed.hidden = true;
+        ed.addEventListener("click", function () { startEdit(e); });
+        acts.appendChild(ed); acts.appendChild(del); row.appendChild(acts); re.appendChild(row);
       });
     }
 
@@ -460,6 +485,7 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size:
     });
 
     $("addForm").hidden = state.canWrite === false || !state.db;
+    renderExtras(list);
     $("readOnly").hidden = state.canWrite !== false;
     renderTabs();
     if (state.tab === "report") renderReport();
@@ -500,6 +526,7 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size:
     if (!isFinite(amount) || amount <= 0) { msg.className = "msg err"; msg.textContent = "Enter an amount greater than zero."; return; }
     if (!$("date").value) { msg.className = "msg err"; msg.textContent = "Pick a date."; return; }
     if (!state.db) { msg.className = "msg err"; msg.textContent = "Saving is not available in this view."; return; }
+    if (state.editId) { saveEdit(amount, msg); return; }
     var who = $("myName").value.trim();
     if (!who) { msg.className = "msg err"; msg.textContent = "Type your name first (for example Anfal or Mufeeda) so this expense is recorded under you."; $("myName").focus(); return; }
     var cur = document.querySelector('input[name="cur"]:checked').value;
@@ -726,6 +753,107 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size:
     btn.disabled = false;
   });
 
+  /* ---------- Edit, search, CSV, settle-up, budgets ---------- */
+  function startEdit(e) {
+    state.editId = e.id;
+    $("amount").value = String(e.amount);
+    var c = $("cur-" + e.currency); if (c) c.checked = true;
+    $("date").value = e.date; $("cat").value = e.category || "Other"; $("note").value = e.note || "";
+    $("addBtn").textContent = "Save changes"; $("cancelEdit").hidden = false;
+    $("formMsg").className = "msg"; $("formMsg").textContent = "Editing an entry by " + nameOf(e.by) + ".";
+    $("addForm").scrollIntoView({ behavior: "smooth", block: "center" }); $("amount").focus();
+  }
+  function endEdit() {
+    state.editId = null; $("amount").value = ""; $("note").value = "";
+    $("addBtn").textContent = "Add expense"; $("cancelEdit").hidden = true; $("formMsg").textContent = "";
+  }
+  function saveEdit(amount, msg) {
+    var o = state.expenses.filter(function (x) { return x.id === state.editId; })[0];
+    if (!o) { endEdit(); return; }
+    var d = {
+      amount: Math.round(amount * 100) / 100, currency: document.querySelector('input[name="cur"]:checked').value,
+      category: $("cat").value, note: $("note").value.trim(), date: $("date").value,
+      by: o.by || "", byName: o.byName || "", created: o.created || Date.now()
+    };
+    var btn = $("addBtn"); btn.disabled = true;
+    state.db.doc("expenses/" + o.id).set(d).then(function () { endEdit(); msg.className = "msg"; msg.textContent = "Changes saved."; })
+      .catch(function (er) { msg.className = "msg err"; msg.textContent = onErr(er); })
+      .then(function () { btn.disabled = false; });
+  }
+  $("cancelEdit").addEventListener("click", endEdit);
+  $("search").addEventListener("input", function () { state.q = this.value.trim().toLowerCase(); render(); });
+
+  $("csvBtn").addEventListener("click", async function () {
+    var rows = state.shown || [];
+    if (!rows.length) { $("count").textContent = "Nothing to export"; return; }
+    function q(v) { v = String(v == null ? "" : v); if (/^[=+\-@]/.test(v)) v = "'" + v; return '"' + v.replace(/"/g, '""') + '"'; }
+    var lines = ["Date,Who,Category,Note,Amount,Currency,AED,RUB"];
+    rows.slice().sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; }).forEach(function (e) {
+      lines.push([q(e.date), q(nameOf(e.by)), q(e.category || "Other"), q(e.note), e.amount, q(e.currency), toAed(e).toFixed(2), (toAed(e) * state.rate).toFixed(2)].join(","));
+    });
+    var blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    var fname = "ledger-" + (state.q ? "search" : state.month) + ".csv";
+    try {
+      if (state.dl) await state.dl.save({ filename: fname, data: blob });
+      else { var u = URL.createObjectURL(blob), a = document.createElement("a"); a.href = u; a.download = fname; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 4000); }
+    } catch (er) {}
+  });
+
+  function saveBudget(c, v) {
+    var m = Object.assign({}, state.budgets);
+    if (isFinite(v) && v > 0) m[c] = v; else delete m[c];
+    var arr = Object.keys(m).map(function (k) { return { c: k, v: m[k] }; });
+    if (state.db) state.db.doc("settings/budgets").set({ list: arr }).catch(function (er) { showBanner(onErr(er)); });
+  }
+
+  function renderExtras(list) {
+    var ids = personIds(), paid = {}, total = 0;
+    ids.forEach(function (id) { paid[id] = 0; });
+    list.forEach(function (e) { if (e.by in paid) { var v = toAed(e); paid[e.by] += v; total += v; } });
+    var se = $("settle"); se.textContent = "";
+    if (ids.length < 2) se.appendChild(el("div", "msg", "Settle-up appears once both of you have added an expense."));
+    else {
+      var bal = ids.map(function (id) { return { id: id, v: paid[id] - total / ids.length }; });
+      var debt = bal.filter(function (b) { return b.v < 0; }), cred = bal.filter(function (b) { return b.v > 0; });
+      var i = 0, j = 0, n = 0;
+      while (i < debt.length && j < cred.length) {
+        var amt = Math.min(-debt[i].v, cred[j].v);
+        if (inDisp(amt) >= 0.5) {
+          var r = el("div", "owe"); r.appendChild(el("span", null, nameOf(debt[i].id) + " owes " + nameOf(cred[j].id)));
+          r.appendChild(el("span", "num", fmt(inDisp(amt)) + " " + state.disp)); se.appendChild(r); n++;
+        }
+        debt[i].v += amt; cred[j].v -= amt;
+        if (debt[i].v > -1e-6) i++;
+        if (cred[j].v < 1e-6) j++;
+      }
+      if (!n) se.appendChild(el("div", "msg", "All square for " + monthName(state.month, true) + "."));
+    }
+
+    var spent = {}, over = 0;
+    list.forEach(function (e) { var c = e.category || "Other"; spent[c] = (spent[c] || 0) + toAed(e); });
+    CATS.forEach(function (c) { var l = state.budgets[c]; if (l && (spent[c] || 0) > l) over++; });
+    var bw = $("budWarn"); bw.className = over ? "msg err" : "msg";
+    bw.textContent = over ? over + (over === 1 ? " category is" : " categories are") + " over budget in " + monthName(state.month, true) + "." : "";
+    var be = $("budgets");
+    if (be.contains(document.activeElement)) return;
+    be.textContent = "";
+    CATS.forEach(function (c) {
+      var s = spent[c] || 0, lim = state.budgets[c] || 0, row = el("div", "bud");
+      var top = el("div", "bt"); top.appendChild(el("span", null, c));
+      var inp = el("input"); inp.type = "number"; inp.min = "0"; inp.step = "1"; inp.placeholder = "No limit"; inp.value = lim || "";
+      inp.disabled = state.canWrite === false || !state.db; inp.setAttribute("aria-label", "Monthly budget for " + c + " in AED");
+      inp.addEventListener("change", function () { saveBudget(c, parseFloat(inp.value)); inp.blur(); });
+      top.appendChild(inp); row.appendChild(top);
+      var tr = el("div", "track"), bar = el("i"), st = el("div", "st");
+      if (lim) {
+        bar.style.width = Math.min(100, s / lim * 100) + "%";
+        if (s > lim) { bar.style.background = "var(--danger)"; st.className = "st over"; st.textContent = "Over budget by " + fmt(s - lim) + " AED (" + fmt(s) + " of " + fmt(lim) + ")"; }
+        else { if (s >= lim * 0.9) bar.style.background = "var(--b)"; st.textContent = fmt(s) + " of " + fmt(lim) + " AED" + (s >= lim * 0.9 ? " · almost at the limit" : ""); }
+      } else st.textContent = s ? fmt(s) + " AED spent, no budget set" : "";
+      tr.appendChild(bar); row.appendChild(tr); row.appendChild(st); be.appendChild(row);
+    });
+  }
+
   /* Browser-only store used when the shared database is not reachable (for example the page opened as a plain file). */
   function localDb() {
     var KEY = "ledger-local-v1", mem = {}, subs = [];
@@ -778,6 +906,11 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size:
       var m = {}; snap.docs.forEach(function (d) { m[d.id] = d.data() || {}; });
       state.people = m; state.peopleLoaded = true; render();
     }, function () { state.peopleLoaded = true; render(); });
+    db.doc("settings/budgets").onSnapshot(function (snap) {
+      var d = snap.exists ? snap.data() : null, m = {};
+      ((d && d.list) || []).forEach(function (x) { if (x && x.c && x.v > 0) m[x.c] = x.v; });
+      state.budgets = m; render();
+    }, function () {});
     db.doc("settings/rate").onSnapshot(function (snap) {
       var d = snap.exists ? snap.data() : null;
       if (d && d.rubPerAed > 0) { state.rate = d.rubPerAed; $("rate").value = d.rubPerAed; }
