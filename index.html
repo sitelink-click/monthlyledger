@@ -185,6 +185,9 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
 .pbtn b{font-family:var(--display);font-size:24px}
 .pbtn small{color:var(--muted);font-family:var(--mono);font-size:12px;min-height:16px}
 .av{width:64px;height:64px;border-radius:50%;background:var(--pc);color:var(--on-accent);display:flex;align-items:center;justify-content:center;font-family:var(--display);font-size:28px;font-weight:700}
+.f.cur{display:none}
+form.add .f.amount{grid-column:span 6}
+form.add .f.date{grid-column:span 6}
 @media (max-width: 640px) {
   .summary, .two { grid-template-columns: minmax(0, 1fr); }
   .f.amount { grid-column: span 7; } .f.cur { grid-column: span 5; } .f.date { grid-column: span 6; }
@@ -240,7 +243,7 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
       <div class="big num"><span id="totalVal">0</span><small id="totalCur">AED</small></div>
       <div class="delta" id="delta"></div>
       <div class="label" style="margin-top:16px">Monthly budget</div>
-      <div class="mbrow"><input type="number" id="mbInput" min="0" step="1" inputmode="decimal" placeholder="Set amount" aria-label="Monthly budget in AED"><span class="msg">AED per month</span></div>
+      <div class="mbrow"><input type="number" id="mbInput" min="0" step="1" inputmode="decimal" placeholder="Set amount" aria-label="Monthly budget in AED"><span class="msg" id="mbCur">AED per month</span></div>
       <div class="mbout" id="mbOut"></div>
     </div>
     <div class="card">
@@ -252,7 +255,7 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
   <section class="card addcard" aria-label="Add an expense">
     <div class="head">
       <h2>Add an expense</h2>
-      <label class="rate" for="rate">1 AED = <input type="number" id="rate" min="0" step="0.01" inputmode="decimal" value="23"> RUB</label>
+      
     </div>
     <div class="namebox" id="nameBox">
       <label class="label" for="myName">Your name</label>
@@ -291,7 +294,7 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
 
   <section class="two" id="extraSec" aria-label="Settle up and budgets">
     <div class="card"><h2>Settle up</h2><div id="settle" style="margin-top:8px"></div><div class="msg" style="margin-top:10px">Assumes every expense this month is shared equally.</div></div>
-    <div class="card"><h2>Category budgets</h2><div class="msg" id="budWarn"></div><div class="msg">Monthly limit in AED. Leave empty for no limit.</div><div id="budgets"></div></div>
+    <div class="card"><h2>Category budgets</h2><div class="msg" id="budWarn"></div><div class="msg">Monthly limit in the selected currency. Leave empty for no limit.</div><div id="budgets"></div></div>
   </section>
 
   <section class="stack" id="personCards" aria-label="Expenses by person"></section>
@@ -340,12 +343,12 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
   function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 
   var savedDisp = load("ledger-disp");
-  if (savedDisp === "RUB") { state.disp = "RUB"; $("disp-RUB").checked = true; }
+  if (savedDisp === "RUB") { state.disp = "RUB"; $("disp-RUB").checked = true; $("cur-RUB").checked = true; }
   $("date").value = todayStr();
   CATS.forEach(function (c) { var o = el("option", null, c); o.value = c; $("cat").appendChild(o); });
 
-  function toAed(e) { return e.currency === "RUB" ? e.amount / state.rate : e.amount; }
-  function inDisp(aed) { return state.disp === "AED" ? aed : aed * state.rate; }
+  function toAed(e) { return e.amount; }
+  function inDisp(v) { return v; }
   function nameOf(id) {
     if (PEOPLE[id]) return PEOPLE[id];
     var p = state.people[id];
@@ -551,7 +554,7 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
   $("prev").addEventListener("click", function () { state.month = shiftMonth(state.month, -1); render(); });
   $("next").addEventListener("click", function () { state.month = shiftMonth(state.month, 1); render(); });
   document.querySelectorAll('input[name="disp"]').forEach(function (r) {
-    r.addEventListener("change", function () { state.disp = r.value; store("ledger-disp", r.value); render(); });
+    r.addEventListener("change", function () { state.disp = r.value; store("ledger-disp", r.value); $("cur-" + r.value).checked = true; applyPerson(); render(); });
   });
 
   $("addForm").addEventListener("submit", function (ev) {
@@ -586,13 +589,6 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
     state.db.doc("people/" + state.myId).set({ name: n }).catch(function (er) { showBanner(onErr(er)); });
   });
 
-  $("rate").addEventListener("change", function () {
-    var v = parseFloat($("rate").value);
-    if (!isFinite(v) || v <= 0) { $("rate").value = state.rate; return; }
-    if (state.db && state.canWrite !== false) state.db.doc("settings/rate").set({ rubPerAed: v }).catch(function (er) { showBanner(onErr(er)); });
-    else { state.rate = v; render(); }
-  });
-
   /* ---------- Monthly report: preview tab + Word (.docx) export ---------- */
   function dfmt(iso) {
     return new Date(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)).toLocaleDateString("en", { day: "2-digit", month: "short", year: "numeric" });
@@ -600,85 +596,49 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
   function two(n) { return fmt(n, 2); }
 
   function reportData(key) {
+    var C = state.disp;
     var list = monthEntries(key).slice().sort(function (a, b) {
       return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.created || 0) - (b.created || 0);
     });
-    var rate = state.rate;
-    var sumA = function (arr) { return arr.reduce(function (t, e) { return t + toAed(e); }, 0); };
-    var totalAed = sumA(list);
-    var share = function (v) { return totalAed ? (v / totalAed * 100).toFixed(1) + "%" : "0%"; };
+    var sumA = function (arr) { return arr.reduce(function (t, e) { return t + e.amount; }, 0); };
+    var total = sumA(list);
+    var share = function (v) { return total ? (v / total * 100).toFixed(1) + "%" : "0%"; };
     var p = key.split("-"), nd = new Date(+p[0], +p[1], 0).getDate();
     var daysCount = key === ym(new Date()) ? new Date().getDate() : nd;
-    var prevKey = shiftMonth(key, -1), prev = monthEntries(prevKey), prevAed = sumA(prev);
+    var prevKey = shiftMonth(key, -1), prev = monthEntries(prevKey), prevT = sumA(prev);
     var byDay = {}; list.forEach(function (e) { (byDay[e.date] = byDay[e.date] || []).push(e); });
     var dayKeys = Object.keys(byDay).sort();
     var top = null; dayKeys.forEach(function (d) { var v = sumA(byDay[d]); if (!top || v > top.v) top = { d: d, v: v }; });
-    var nat = { AED: 0, RUB: 0 }; list.forEach(function (e) { nat[e.currency] = (nat[e.currency] || 0) + e.amount; });
     var prevTxt = prev.length
-      ? (totalAed >= prevAed ? "Up " : "Down ") + two(Math.abs(totalAed - prevAed)) + " AED (" + (prevAed ? Math.round(Math.abs(totalAed - prevAed) / prevAed * 100) : 0) + "%) compared with " + monthName(prevKey)
+      ? (total >= prevT ? "Up " : "Down ") + two(Math.abs(total - prevT)) + " " + C + " (" + (prevT ? Math.round(Math.abs(total - prevT) / prevT * 100) : 0) + "%) compared with " + monthName(prevKey)
       : "No entries in " + monthName(prevKey);
-
+    var amtH = "Amount (" + C + ")";
     var tables = [];
     tables.push({
       heading: "Summary",
       cols: [{ h: "Item", w: 0.32 }, { h: "Value", w: 0.68 }],
       rows: [
-        ["Total spent", two(totalAed) + " AED  /  " + two(totalAed * rate) + " RUB"],
+        ["Person", state.person ? PEOPLE[state.person] : ""],
+        ["Currency", C],
+        ["Total spent", two(total) + " " + C],
         ["Number of entries", String(list.length)],
-        ["Average per day", two(daysCount ? totalAed / daysCount : 0) + " AED (over " + daysCount + " days)"],
-        ["Highest-spending day", top ? dfmt(top.d) + ": " + two(top.v) + " AED" : "None"],
-        ["Paid in AED", two(nat.AED) + " AED"],
-        ["Paid in RUB", two(nat.RUB) + " RUB"],
-        ["Exchange rate used", "1 AED = " + rate + " RUB"],
+        ["Average per day", two(daysCount ? total / daysCount : 0) + " " + C + " (over " + daysCount + " days)"],
+        ["Highest-spending day", top ? dfmt(top.d) + ": " + two(top.v) + " " + C : "None"],
         ["Compared with last month", prevTxt]
       ]
     });
-
-    var cols5 = function (first) {
-      return [{ h: first, w: 0.34 }, { h: "Entries", w: 0.14, r: true }, { h: "AED", w: 0.18, r: true }, { h: "RUB", w: 0.2, r: true }, { h: "Share", w: 0.14, r: true }];
-    };
-    var group = function (keyFn, order) {
-      var m = {}; list.forEach(function (e) { var k = keyFn(e); (m[k] = m[k] || []).push(e); });
-      var keys = Object.keys(m).sort(function (a, b) { return sumA(m[b]) - sumA(m[a]); });
-      var rows = keys.map(function (k) { var v = sumA(m[k]); return [order(k), String(m[k].length), two(v), two(v * rate), share(v)]; });
-      rows.push(["Total", String(list.length), two(totalAed), two(totalAed * rate), totalAed ? "100%" : "0%"]);
-      return rows;
-    };
-    tables.push({ heading: "By person", cols: cols5("Person"), rows: group(function (e) { return e.by || ""; }, function (k) { return nameOf(k); }), boldLast: true });
-    var pids = []; list.forEach(function (e) { if (pids.indexOf(e.by) < 0) pids.push(e.by); });
-    pids.sort(function (a, b) { return nameOf(a) < nameOf(b) ? -1 : 1; });
-    pids.forEach(function (pid) {
-      var mine = list.filter(function (e) { return e.by === pid; }), mt = sumA(mine), nm = nameOf(pid);
-      var cm = {}; mine.forEach(function (e) { var k = e.category || "Other"; (cm[k] = cm[k] || []).push(e); });
-      var ck = Object.keys(cm).sort(function (a, b) { return sumA(cm[b]) - sumA(cm[a]); });
-      var crow = ck.map(function (k) { var v = sumA(cm[k]); return [k, String(cm[k].length), two(v), two(v * rate), mt ? (v / mt * 100).toFixed(1) + "%" : "0%"]; });
-      crow.push(["Total", String(mine.length), two(mt), two(mt * rate), "100%"]);
-      tables.push({ heading: nm + ": by category", cols: cols5("Category"), rows: crow, boldLast: true });
-      var erow = mine.map(function (e) { return [dfmt(e.date), e.category || "Other", e.note || "", two(e.amount) + " " + e.currency, two(toAed(e)), two(toAed(e) * rate)]; });
-      erow.push(["Total", "", "", "", two(mt), two(mt * rate)]);
-      tables.push({ heading: nm + ": all entries", cols: [{ h: "Date", w: 0.13 }, { h: "Category", w: 0.2 }, { h: "Note", w: 0.31 }, { h: "Paid", w: 0.14, r: true }, { h: "AED", w: 0.11, r: true }, { h: "RUB", w: 0.11, r: true }], rows: erow, boldLast: true });
-    });
-    tables.push({ heading: "By category", cols: cols5("Category"), rows: group(function (e) { return e.category || "Other"; }, function (k) { return k; }), boldLast: true });
-
-    var dayRows = dayKeys.map(function (d) { var v = sumA(byDay[d]); return [dfmt(d), String(byDay[d].length), two(v), two(v * rate)]; });
-    dayRows.push(["Total", String(list.length), two(totalAed), two(totalAed * rate)]);
-    tables.push({
-      heading: "By day",
-      cols: [{ h: "Date", w: 0.3 }, { h: "Entries", w: 0.14, r: true }, { h: "AED", w: 0.28, r: true }, { h: "RUB", w: 0.28, r: true }],
-      rows: dayRows, boldLast: true
-    });
-
-    var rowsAll = list.map(function (e) {
-      return [dfmt(e.date), nameOf(e.by), e.category || "Other", e.note || "", two(e.amount) + " " + e.currency, two(toAed(e)), two(toAed(e) * rate)];
-    });
-    rowsAll.push(["Total", "", "", "", "", two(totalAed), two(totalAed * rate)]);
-    tables.push({
-      heading: "All entries",
-      cols: [{ h: "Date", w: 0.11 }, { h: "Who", w: 0.11 }, { h: "Category", w: 0.15 }, { h: "Note", w: 0.3 }, { h: "Paid", w: 0.13, r: true }, { h: "AED", w: 0.1, r: true }, { h: "RUB", w: 0.1, r: true }],
-      rows: rowsAll, boldLast: true
-    });
-
-    return { key: key, count: list.length, rate: rate, tables: tables };
+    var m = {}; list.forEach(function (e) { var k = e.category || "Other"; (m[k] = m[k] || []).push(e); });
+    var keys = Object.keys(m).sort(function (a, b) { return sumA(m[b]) - sumA(m[a]); });
+    var crow = keys.map(function (k) { var v = sumA(m[k]); return [k, String(m[k].length), two(v), share(v)]; });
+    crow.push(["Total", String(list.length), two(total), total ? "100%" : "0%"]);
+    tables.push({ heading: "By category", cols: [{ h: "Category", w: 0.4 }, { h: "Entries", w: 0.2, r: true }, { h: amtH, w: 0.25, r: true }, { h: "Share", w: 0.15, r: true }], rows: crow, boldLast: true });
+    var dayRows = dayKeys.map(function (d) { return [dfmt(d), String(byDay[d].length), two(sumA(byDay[d]))]; });
+    dayRows.push(["Total", String(list.length), two(total)]);
+    tables.push({ heading: "By day", cols: [{ h: "Date", w: 0.4 }, { h: "Entries", w: 0.2, r: true }, { h: amtH, w: 0.4, r: true }], rows: dayRows, boldLast: true });
+    var rowsAll = list.map(function (e) { return [dfmt(e.date), e.category || "Other", e.note || "", two(e.amount)]; });
+    rowsAll.push(["Total", "", "", two(total)]);
+    tables.push({ heading: "All entries", cols: [{ h: "Date", w: 0.12 }, { h: "Category", w: 0.2 }, { h: "Note", w: 0.48 }, { h: amtH, w: 0.2, r: true }], rows: rowsAll, boldLast: true });
+    return { key: key, count: list.length, currency: C, tables: tables };
   }
 
   function renderTabs() {
@@ -694,7 +654,7 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
     var r = reportData(state.month);
     $("repTitle").textContent = "Monthly report, " + monthName(state.month);
     $("repSub").textContent = r.count
-      ? r.count + (r.count === 1 ? " entry" : " entries") + ". Amounts shown in AED and RUB at 1 AED = " + r.rate + " RUB."
+      ? r.count + (r.count === 1 ? " entry" : " entries") + ". All amounts in " + r.currency + "."
       : "No expenses recorded for this month yet.";
     $("dlBtn").disabled = !r.count;
     var host = $("repBody"); host.textContent = "";
@@ -745,9 +705,9 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
     var W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
     var head = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
     var body = wp("Monthly Expense Report", { style: "Title" });
-    body += wp(monthName(r.key) + "  |  Generated " + new Date().toLocaleDateString("en", { day: "numeric", month: "long", year: "numeric" }) + "  |  Exchange rate used: 1 AED = " + r.rate + " RUB", { color: "5B6C66" });
+    body += wp(monthName(r.key) + "  |  Generated " + new Date().toLocaleDateString("en", { day: "numeric", month: "long", year: "numeric" }) + "  |  Currency: " + r.currency, { color: "5B6C66" });
     r.tables.forEach(function (t) { body += wp(t.heading, { style: "Heading1" }) + wtable(t) + wp(""); });
-    body += wp("Amounts paid in RUB are converted to AED, and amounts paid in AED to RUB, at the exchange rate shown above. The Paid column keeps the original amount and currency of each entry.", { color: "5B6C66", size: 18 });
+    body += wp("All amounts are in " + r.currency + ".", { color: "5B6C66", size: 18 });
     var doc = head + "<w:document " + W + "><w:body>" + body +
       '<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="1000" w:right="1000" w:bottom="1000" w:left="1000" w:header="500" w:footer="500" w:gutter="0"/></w:sectPr></w:body></w:document>';
     var styles = head + "<w:styles " + W + '><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/><w:sz w:val="21"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="264" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>' +
@@ -820,20 +780,22 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
   $("clearForm").addEventListener("click", function () { endEdit(); $("formMsg").className = "msg"; $("amount").focus(); });
   $("mbInput").addEventListener("change", function () {
     var v = parseFloat($("mbInput").value);
-    if (state.db && state.person) { var all = Object.assign({}, state.mbAll); all[state.person] = isFinite(v) && v > 0 ? v : 0; state.db.doc("settings/monthly").set(all).catch(function (er) { showBanner(onErr(er)); }); }
+    if (state.db && state.person) { var all = Object.assign({}, state.mbAll); all[bkey()] = isFinite(v) && v > 0 ? v : 0; state.db.doc("settings/monthly").set(all).catch(function (er) { showBanner(onErr(er)); }); }
     $("mbInput").blur();
   });
   var PEOPLE = { anfal: "Anfal", mufeeda: "Mufeeda" };
+  function bkey() { return state.person + "-" + state.disp; }
   function belongs(x, p) { return x.by === p || String(x.byName || "").trim().toLowerCase() === PEOPLE[p].toLowerCase(); }
   function applyPerson() {
     var p = state.person;
-    state.expenses = !p ? [] : state.all.filter(function (x) { return belongs(x, p); }).map(function (x) { return Object.assign({}, x, { by: p }); });
+    state.expenses = !p ? [] : state.all.filter(function (x) { return belongs(x, p) && x.currency === state.disp; }).map(function (x) { return Object.assign({}, x, { by: p }); });
   }
   function renderLanding() {
     var key = ym(new Date());
     Object.keys(PEOPLE).forEach(function (p) {
-      var t = state.all.filter(function (x) { return belongs(x, p) && x.date && x.date.slice(0, 7) === key; }).reduce(function (a, x) { return a + toAed(x); }, 0);
-      $("lt-" + p).textContent = state.loaded ? "This month: " + fmt(t) + " AED" : "";
+      var t = { AED: 0, RUB: 0 };
+      state.all.forEach(function (x) { if (belongs(x, p) && x.date && x.date.slice(0, 7) === key && t[x.currency] != null) t[x.currency] += x.amount; });
+      $("lt-" + p).textContent = state.loaded ? "This month: " + fmt(t.AED) + " AED \u00b7 " + fmt(t.RUB) + " RUB" : "";
     });
   }
   function showPerson(p) {
@@ -875,16 +837,18 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
     var m = Object.assign({}, state.budgets);
     if (isFinite(v) && v > 0) m[c] = v; else delete m[c];
     var arr = Object.keys(m).map(function (k) { return { c: k, v: m[k] }; });
-    if (state.db && state.person) { var all = Object.assign({}, state.budAll); all[state.person] = arr; state.db.doc("settings/budgets").set(all).catch(function (er) { showBanner(onErr(er)); }); }
+    if (state.db && state.person) { var all = Object.assign({}, state.budAll); all[bkey()] = arr; state.db.doc("settings/budgets").set(all).catch(function (er) { showBanner(onErr(er)); }); }
   }
 
   function renderExtras(list) {
-    state.mb = state.mbAll[state.person] > 0 ? state.mbAll[state.person] : 0;
-    var bm = {}; (state.budAll[state.person] || []).forEach(function (x) { if (x && x.c && x.v > 0) bm[x.c] = x.v; });
+    state.mb = state.mbAll[bkey()] > 0 ? state.mbAll[bkey()] : 0;
+    var bm = {}; (state.budAll[bkey()] || []).forEach(function (x) { if (x && x.c && x.v > 0) bm[x.c] = x.v; });
     state.budgets = bm;
     $("settle").parentNode.hidden = true; $("extraSec").style.gridTemplateColumns = "minmax(0, 1fr)";
     renderLanding();
     var mbi = $("mbInput");
+    $("mbCur").textContent = state.disp + " per month";
+    document.querySelector('label[for="amount"]').textContent = "Amount (" + state.disp + ")";
     if (document.activeElement !== mbi) mbi.value = state.mb || "";
     mbi.disabled = state.canWrite === false || !state.db;
     var mo = $("mbOut"); mo.textContent = "";
@@ -944,9 +908,9 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
       var tr = el("div", "track"), bar = el("i"), st = el("div", "st");
       if (lim) {
         bar.style.width = Math.min(100, s / lim * 100) + "%";
-        if (s > lim) { bar.style.background = "var(--danger)"; st.className = "st over"; st.textContent = "Over budget by " + fmt(s - lim) + " AED (" + fmt(s) + " of " + fmt(lim) + ")"; }
-        else { if (s >= lim * 0.9) bar.style.background = "var(--b)"; st.textContent = fmt(s) + " of " + fmt(lim) + " AED" + (s >= lim * 0.9 ? " · almost at the limit" : ""); }
-      } else st.textContent = s ? fmt(s) + " AED spent, no budget set" : "";
+        if (s > lim) { bar.style.background = "var(--danger)"; st.className = "st over"; st.textContent = "Over budget by " + fmt(s - lim) + " " + state.disp + " (" + fmt(s) + " of " + fmt(lim) + ")"; }
+        else { if (s >= lim * 0.9) bar.style.background = "var(--b)"; st.textContent = fmt(s) + " of " + fmt(lim) + " " + state.disp + "" + (s >= lim * 0.9 ? " · almost at the limit" : ""); }
+      } else st.textContent = s ? fmt(s) + " " + state.disp + " spent, no budget set" : "";
       tr.appendChild(bar); row.appendChild(tr); row.appendChild(st); be.appendChild(row);
     });
   }
@@ -1009,11 +973,7 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
     db.doc("settings/budgets").onSnapshot(function (snap) {
       state.budAll = snap.exists ? (snap.data() || {}) : {}; render();
     }, function () {});
-    db.doc("settings/rate").onSnapshot(function (snap) {
-      var d = snap.exists ? snap.data() : null;
-      if (d && d.rubPerAed > 0) { state.rate = d.rubPerAed; $("rate").value = d.rubPerAed; }
-      render();
-    }, function () {});
+    
   }
   init();
 })();
