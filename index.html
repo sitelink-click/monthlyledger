@@ -129,6 +129,18 @@ input.amt-in { font-family: var(--mono); font-size: 18px; }
 .empty { padding: 28px 16px 32px; color: var(--muted); text-align: center; }
 .empty b { display: block; color: var(--ink); font-family: var(--display); font-size: 17px; margin-bottom: 4px; }
 
+.stack { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); }
+.tab { background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 10px 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.tab.on { color: var(--ink); border-bottom-color: var(--a); }
+.head2 { display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
+.repact { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.tblwrap { overflow-x: auto; margin-top: 10px; }
+table.tbl { border-collapse: collapse; width: 100%; min-width: 480px; font-size: 14px; }
+.tbl th { text-align: left; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.tbl td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+.tbl .r { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tbl tr.tot td { font-weight: 600; background: var(--soft); }
 @media (max-width: 640px) {
   .summary, .two { grid-template-columns: minmax(0, 1fr); }
   .f.amount { grid-column: span 7; } .f.cur { grid-column: span 5; } .f.date { grid-column: span 6; }
@@ -158,6 +170,13 @@ input.amt-in { font-family: var(--mono); font-size: 18px; }
   </header>
 
   <div id="banner" class="banner warn" hidden></div>
+
+  <div class="tabs" role="tablist" aria-label="Sections">
+    <button type="button" role="tab" class="tab on" data-tab="ledger" aria-selected="true">Ledger</button>
+    <button type="button" role="tab" class="tab" data-tab="report" aria-selected="false">Monthly report</button>
+  </div>
+
+  <div id="tab-ledger" class="stack">
 
   <section class="summary" aria-label="Month summary">
     <div class="card total">
@@ -214,13 +233,32 @@ input.amt-in { font-family: var(--mono); font-size: 18px; }
     <div class="hd"><h2>Entries</h2><span class="msg" id="count"></span></div>
     <div id="rows"></div>
   </section>
+
+  </div>
+
+  <div id="tab-report" class="stack" hidden>
+    <section class="card" aria-label="Monthly report">
+      <div class="head2">
+        <div>
+          <h2 id="repTitle">Monthly report</h2>
+          <div class="msg" id="repSub"></div>
+        </div>
+        <div class="repact">
+          <button class="btn" type="button" id="dlBtn">Download Word file</button>
+          <span class="msg" id="repMsg" role="status"></span>
+        </div>
+      </div>
+    </section>
+    <div id="repBody" class="stack"></div>
+  </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 (function () {
   var CATS = ["Food & groceries", "Eating out", "Transport", "Rent & bills", "Health", "Shopping", "Flights & visits", "Gifts", "Other"];
   var $ = function (id) { return document.getElementById(id); };
-  var state = { expenses: [], people: {}, rate: 23, month: ym(new Date()), disp: "AED", myId: null, canWrite: null, db: null, peopleLoaded: false, loaded: false };
+  var state = { expenses: [], people: {}, rate: 23, month: ym(new Date()), disp: "AED", myId: null, canWrite: null, db: null, peopleLoaded: false, loaded: false, tab: "ledger", dl: null };
 
   function pad(n) { return (n < 10 ? "0" : "") + n; }
   function ym(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1); }
@@ -364,6 +402,8 @@ input.amt-in { font-family: var(--mono); font-size: 18px; }
 
     $("addForm").hidden = state.canWrite === false || !state.db;
     $("readOnly").hidden = state.canWrite !== false;
+    renderTabs();
+    if (state.tab === "report") renderReport();
     $("nameBox").hidden = !(state.db && state.myId && state.peopleLoaded && !(state.people[state.myId] && state.people[state.myId].name) && state.canWrite !== false);
   }
 
@@ -425,14 +465,229 @@ input.amt-in { font-family: var(--mono); font-size: 18px; }
     else { state.rate = v; render(); }
   });
 
+  /* ---------- Monthly report: preview tab + Word (.docx) export ---------- */
+  function dfmt(iso) {
+    return new Date(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)).toLocaleDateString("en", { day: "2-digit", month: "short", year: "numeric" });
+  }
+  function two(n) { return fmt(n, 2); }
+
+  function reportData(key) {
+    var list = monthEntries(key).slice().sort(function (a, b) {
+      return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.created || 0) - (b.created || 0);
+    });
+    var rate = state.rate;
+    var sumA = function (arr) { return arr.reduce(function (t, e) { return t + toAed(e); }, 0); };
+    var totalAed = sumA(list);
+    var share = function (v) { return totalAed ? (v / totalAed * 100).toFixed(1) + "%" : "0%"; };
+    var p = key.split("-"), nd = new Date(+p[0], +p[1], 0).getDate();
+    var daysCount = key === ym(new Date()) ? new Date().getDate() : nd;
+    var prevKey = shiftMonth(key, -1), prev = monthEntries(prevKey), prevAed = sumA(prev);
+    var byDay = {}; list.forEach(function (e) { (byDay[e.date] = byDay[e.date] || []).push(e); });
+    var dayKeys = Object.keys(byDay).sort();
+    var top = null; dayKeys.forEach(function (d) { var v = sumA(byDay[d]); if (!top || v > top.v) top = { d: d, v: v }; });
+    var nat = { AED: 0, RUB: 0 }; list.forEach(function (e) { nat[e.currency] = (nat[e.currency] || 0) + e.amount; });
+    var prevTxt = prev.length
+      ? (totalAed >= prevAed ? "Up " : "Down ") + two(Math.abs(totalAed - prevAed)) + " AED (" + (prevAed ? Math.round(Math.abs(totalAed - prevAed) / prevAed * 100) : 0) + "%) compared with " + monthName(prevKey)
+      : "No entries in " + monthName(prevKey);
+
+    var tables = [];
+    tables.push({
+      heading: "Summary",
+      cols: [{ h: "Item", w: 0.32 }, { h: "Value", w: 0.68 }],
+      rows: [
+        ["Total spent", two(totalAed) + " AED  /  " + two(totalAed * rate) + " RUB"],
+        ["Number of entries", String(list.length)],
+        ["Average per day", two(daysCount ? totalAed / daysCount : 0) + " AED (over " + daysCount + " days)"],
+        ["Highest-spending day", top ? dfmt(top.d) + ": " + two(top.v) + " AED" : "None"],
+        ["Paid in AED", two(nat.AED) + " AED"],
+        ["Paid in RUB", two(nat.RUB) + " RUB"],
+        ["Exchange rate used", "1 AED = " + rate + " RUB"],
+        ["Compared with last month", prevTxt]
+      ]
+    });
+
+    var cols5 = function (first) {
+      return [{ h: first, w: 0.34 }, { h: "Entries", w: 0.14, r: true }, { h: "AED", w: 0.18, r: true }, { h: "RUB", w: 0.2, r: true }, { h: "Share", w: 0.14, r: true }];
+    };
+    var group = function (keyFn, order) {
+      var m = {}; list.forEach(function (e) { var k = keyFn(e); (m[k] = m[k] || []).push(e); });
+      var keys = Object.keys(m).sort(function (a, b) { return sumA(m[b]) - sumA(m[a]); });
+      var rows = keys.map(function (k) { var v = sumA(m[k]); return [order(k), String(m[k].length), two(v), two(v * rate), share(v)]; });
+      rows.push(["Total", String(list.length), two(totalAed), two(totalAed * rate), totalAed ? "100%" : "0%"]);
+      return rows;
+    };
+    tables.push({ heading: "By person", cols: cols5("Person"), rows: group(function (e) { return e.by || ""; }, function (k) { return nameOf(k); }), boldLast: true });
+    tables.push({ heading: "By category", cols: cols5("Category"), rows: group(function (e) { return e.category || "Other"; }, function (k) { return k; }), boldLast: true });
+
+    var dayRows = dayKeys.map(function (d) { var v = sumA(byDay[d]); return [dfmt(d), String(byDay[d].length), two(v), two(v * rate)]; });
+    dayRows.push(["Total", String(list.length), two(totalAed), two(totalAed * rate)]);
+    tables.push({
+      heading: "By day",
+      cols: [{ h: "Date", w: 0.3 }, { h: "Entries", w: 0.14, r: true }, { h: "AED", w: 0.28, r: true }, { h: "RUB", w: 0.28, r: true }],
+      rows: dayRows, boldLast: true
+    });
+
+    var rowsAll = list.map(function (e) {
+      return [dfmt(e.date), nameOf(e.by), e.category || "Other", e.note || "", two(e.amount) + " " + e.currency, two(toAed(e)), two(toAed(e) * rate)];
+    });
+    rowsAll.push(["Total", "", "", "", "", two(totalAed), two(totalAed * rate)]);
+    tables.push({
+      heading: "All entries",
+      cols: [{ h: "Date", w: 0.11 }, { h: "Who", w: 0.11 }, { h: "Category", w: 0.15 }, { h: "Note", w: 0.3 }, { h: "Paid", w: 0.13, r: true }, { h: "AED", w: 0.1, r: true }, { h: "RUB", w: 0.1, r: true }],
+      rows: rowsAll, boldLast: true
+    });
+
+    return { key: key, count: list.length, rate: rate, tables: tables };
+  }
+
+  function renderTabs() {
+    document.querySelectorAll(".tab").forEach(function (b) {
+      var on = b.getAttribute("data-tab") === state.tab;
+      b.classList.toggle("on", on); b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    $("tab-ledger").hidden = state.tab !== "ledger";
+    $("tab-report").hidden = state.tab !== "report";
+  }
+
+  function renderReport() {
+    var r = reportData(state.month);
+    $("repTitle").textContent = "Monthly report, " + monthName(state.month);
+    $("repSub").textContent = r.count
+      ? r.count + (r.count === 1 ? " entry" : " entries") + ". Amounts shown in AED and RUB at 1 AED = " + r.rate + " RUB."
+      : "No expenses recorded for this month yet.";
+    $("dlBtn").disabled = !r.count;
+    var host = $("repBody"); host.textContent = "";
+    if (!r.count) return;
+    r.tables.forEach(function (t) {
+      var card = el("section", "card"); card.appendChild(el("h2", null, t.heading));
+      var wrap = el("div", "tblwrap"), tb = el("table", "tbl");
+      var thead = el("thead"), htr = el("tr");
+      t.cols.forEach(function (c) { var th = el("th", c.r ? "r" : null, c.h); th.style.textAlign = c.r ? "right" : "left"; htr.appendChild(th); });
+      thead.appendChild(htr); tb.appendChild(thead);
+      var tbody = el("tbody");
+      t.rows.forEach(function (row, i) {
+        var tr = el("tr", t.boldLast && i === t.rows.length - 1 ? "tot" : null);
+        row.forEach(function (cell, j) { tr.appendChild(el("td", t.cols[j].r ? "r" : null, cell)); });
+        tbody.appendChild(tr);
+      });
+      tb.appendChild(tbody); wrap.appendChild(tb); card.appendChild(wrap); host.appendChild(card);
+    });
+  }
+
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+  function wp(text, o) {
+    o = o || {};
+    var rpr = (o.bold ? "<w:b/>" : "") + (o.color ? '<w:color w:val="' + o.color + '"/>' : "") + (o.size ? '<w:sz w:val="' + o.size + '"/>' : "");
+    return "<w:p><w:pPr>" + (o.style ? '<w:pStyle w:val="' + o.style + '"/>' : "") + (o.tight ? '<w:spacing w:after="0"/>' : "") + (o.align ? '<w:jc w:val="' + o.align + '"/>' : "") + "</w:pPr>" +
+      "<w:r>" + (rpr ? "<w:rPr>" + rpr + "</w:rPr>" : "") + '<w:t xml:space="preserve">' + esc(text) + "</w:t></w:r></w:p>";
+  }
+  function wcell(text, width, o) {
+    o = o || {};
+    return '<w:tc><w:tcPr><w:tcW w:w="' + width + '" w:type="dxa"/>' + (o.fill ? '<w:shd w:val="clear" w:color="auto" w:fill="' + o.fill + '"/>' : "") + "</w:tcPr>" +
+      wp(text, { tight: true, bold: o.bold, color: o.color, align: o.right ? "right" : "" }) + "</w:tc>";
+  }
+  function wtable(t) {
+    var total = 14838, widths = t.cols.map(function (c) { return Math.round(c.w * total); });
+    var x = '<w:tbl><w:tblPr><w:tblW w:w="' + total + '" w:type="dxa"/><w:tblBorders>' +
+      ["top", "left", "bottom", "right", "insideH", "insideV"].map(function (b) { return "<w:" + b + ' w:val="single" w:sz="4" w:space="0" w:color="BFC9C5"/>'; }).join("") +
+      '</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="50" w:type="dxa"/><w:left w:w="90" w:type="dxa"/><w:bottom w:w="50" w:type="dxa"/><w:right w:w="90" w:type="dxa"/></w:tblCellMar></w:tblPr>';
+    x += "<w:tblGrid>" + widths.map(function (w) { return '<w:gridCol w:w="' + w + '"/>'; }).join("") + "</w:tblGrid>";
+    x += "<w:tr><w:trPr><w:cantSplit/><w:tblHeader/></w:trPr>" + t.cols.map(function (c, i) { return wcell(c.h, widths[i], { fill: "0D7A6E", color: "FFFFFF", bold: true, right: c.r }); }).join("") + "</w:tr>";
+    t.rows.forEach(function (row, i) {
+      var last = t.boldLast && i === t.rows.length - 1;
+      x += "<w:tr><w:trPr><w:cantSplit/></w:trPr>" + row.map(function (cell, j) { return wcell(cell, widths[j], { bold: last, fill: last ? "E6EDEA" : "", right: t.cols[j].r }); }).join("") + "</w:tr>";
+    });
+    return x + "</w:tbl>";
+  }
+
+  async function buildDocx(r) {
+    var W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+    var head = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    var body = wp("Monthly Expense Report", { style: "Title" });
+    body += wp(monthName(r.key) + "  |  Generated " + new Date().toLocaleDateString("en", { day: "numeric", month: "long", year: "numeric" }) + "  |  Exchange rate used: 1 AED = " + r.rate + " RUB", { color: "5B6C66" });
+    r.tables.forEach(function (t) { body += wp(t.heading, { style: "Heading1" }) + wtable(t) + wp(""); });
+    body += wp("Amounts paid in RUB are converted to AED, and amounts paid in AED to RUB, at the exchange rate shown above. The Paid column keeps the original amount and currency of each entry.", { color: "5B6C66", size: 18 });
+    var doc = head + "<w:document " + W + "><w:body>" + body +
+      '<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="1000" w:right="1000" w:bottom="1000" w:left="1000" w:header="500" w:footer="500" w:gutter="0"/></w:sectPr></w:body></w:document>';
+    var styles = head + "<w:styles " + W + '><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/><w:sz w:val="21"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="264" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>' +
+      '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>' +
+      '<w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:after="60"/></w:pPr><w:rPr><w:b/><w:color w:val="0D7A6E"/><w:sz w:val="44"/></w:rPr></w:style>' +
+      '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:pPr><w:keepNext/><w:spacing w:before="320" w:after="100"/><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:color w:val="15231F"/><w:sz w:val="30"/></w:rPr></w:style></w:styles>';
+    var zip = new window.JSZip();
+    zip.file("[Content_Types].xml", head + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>');
+    zip.file("_rels/.rels", head + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+    zip.file("word/_rels/document.xml.rels", head + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
+    zip.file("word/document.xml", doc);
+    zip.file("word/styles.xml", styles);
+    return zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", compression: "DEFLATE" });
+  }
+
+  document.querySelectorAll(".tab").forEach(function (b) {
+    b.addEventListener("click", function () { state.tab = b.getAttribute("data-tab"); render(); });
+  });
+  $("dlBtn").addEventListener("click", async function () {
+    var msg = $("repMsg"); msg.className = "msg"; msg.textContent = "";
+    if (!window.JSZip) { msg.className = "msg err"; msg.textContent = "The Word export could not load. Check your connection and reload."; return; }
+    var btn = $("dlBtn"); btn.disabled = true;
+    try {
+      var blob = await buildDocx(reportData(state.month));
+      var fname = "Expense-report-" + state.month + ".docx";
+      if (state.dl) {
+        var res = await state.dl.save({ filename: fname, data: blob });
+        msg.textContent = res && res.status === "saved" ? "Word file saved." : "Done.";
+      } else {
+        var u = URL.createObjectURL(blob), a = document.createElement("a");
+        a.href = u; a.download = fname; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
+        msg.textContent = "Word file downloaded.";
+      }
+    } catch (e) {
+      if (e && e.code === "declined") msg.textContent = "Download cancelled.";
+      else { msg.className = "msg err"; msg.textContent = "The Word file could not be saved here (" + ((e && e.code) || "error") + ")."; }
+    }
+    btn.disabled = false;
+  });
+
+  /* Browser-only store used when the shared database is not reachable (for example the page opened as a plain file). */
+  function localDb() {
+    var KEY = "ledger-local-v1", mem = {}, subs = [];
+    try { var raw = localStorage.getItem(KEY); if (raw) mem = JSON.parse(raw) || {}; } catch (e) { mem = {}; }
+    function persist() { try { localStorage.setItem(KEY, JSON.stringify(mem)); } catch (e) {} subs.slice().forEach(function (f) { f(); }); }
+    function coll(p) { return mem[p] || (mem[p] = {}); }
+    var meta = { fromCache: false, hasPendingWrites: false };
+    function watch(f) { subs.push(f); setTimeout(f, 0); return function () { subs = subs.filter(function (x) { return x !== f; }); }; }
+    function docRef(cp, id) {
+      return {
+        id: id, path: cp + "/" + id,
+        set: function (d) { coll(cp)[id] = JSON.parse(JSON.stringify(d)); persist(); return Promise.resolve(); },
+        delete: function () { delete coll(cp)[id]; persist(); return Promise.resolve(); },
+        onSnapshot: function (next) { return watch(function () { var c = coll(cp); next({ id: id, exists: id in c, data: function () { return c[id]; }, metadata: meta }); }); }
+      };
+    }
+    function collRef(p) {
+      return {
+        add: function (d) { var id = "l" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); return docRef(p, id).set(d).then(function () { return docRef(p, id); }); },
+        onSnapshot: function (next) {
+          return watch(function () {
+            var c = coll(p), docs = Object.keys(c).sort().map(function (id) { return { id: id, exists: true, data: function () { return c[id]; }, metadata: meta }; });
+            next({ docs: docs, size: docs.length, empty: !docs.length, metadata: meta, docChanges: function () { return []; } });
+          });
+        }
+      };
+    }
+    return { collection: collRef, doc: function (p) { var i = p.lastIndexOf("/"); return docRef(p.slice(0, i), p.slice(i + 1)); } };
+  }
+
   async function init() {
     render();
     var api = window.claude && window.claude.use ? window.claude : null;
     var db = null, user = null;
-    if (api) { try { db = await api.use("db"); } catch (e) { db = null; } try { user = await api.use("user"); } catch (e) { user = null; } }
-    if (!db) { showBanner("Saving is not available in this view. Open the shared link while signed in to add expenses."); render(); return; }
+    if (api) { try { db = await api.use("db"); } catch (e) { db = null; } try { user = await api.use("user"); } catch (e) { user = null; } try { state.dl = await api.use("downloads"); } catch (e) { state.dl = null; } }
+    var localOnly = false;
+    if (!db) { db = localDb(); localOnly = true; state.myId = "me"; state.canWrite = true; state.local = true;
+      showBanner("Shared saving is not available here, so entries are kept only in this browser. Open the page from your claude.ai artifacts while signed in to share it with your partner."); }
     state.db = db;
-    if (user) { try { state.myId = await user.id(); } catch (e) {} try { state.canWrite = await user.can("data.write"); } catch (e) {} }
+    if (user && !localOnly) { try { state.myId = await user.id(); } catch (e) {} try { state.canWrite = await user.can("data.write"); } catch (e) {} }
 
     var timer = setTimeout(function () { if (!state.loaded) showBanner("The ledger is taking a while to load. What you see may be out of date."); }, 10000);
     db.collection("expenses").onSnapshot(function (snap) {
