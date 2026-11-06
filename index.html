@@ -176,6 +176,15 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
 .mbout .left.neg{color:var(--danger)}
 .mbout .track{height:8px;background:var(--soft);border-radius:4px;overflow:hidden;margin:8px 0 6px}
 .mbout .track i{display:block;height:100%;background:var(--a)}
+#app[hidden],#landing[hidden]{display:none!important}
+.landing{min-height:80vh;display:flex;align-items:center;justify-content:center}
+.lwrap{width:100%;max-width:560px;text-align:center;display:flex;flex-direction:column;gap:16px}
+.lgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.pbtn{background:var(--surface);border:1px solid var(--line);border-top:4px solid var(--pc);border-radius:14px;padding:28px 12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:10px}
+.pbtn:hover{border-color:var(--pc)}
+.pbtn b{font-family:var(--display);font-size:24px}
+.pbtn small{color:var(--muted);font-family:var(--mono);font-size:12px;min-height:16px}
+.av{width:64px;height:64px;border-radius:50%;background:var(--pc);color:var(--on-accent);display:flex;align-items:center;justify-content:center;font-family:var(--display);font-size:28px;font-weight:700}
 @media (max-width: 640px) {
   .summary, .two { grid-template-columns: minmax(0, 1fr); }
   .f.amount { grid-column: span 7; } .f.cur { grid-column: span 5; } .f.date { grid-column: span 6; }
@@ -185,13 +194,25 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
 
-<div class="wrap">
+<div id="landing" class="landing">
+  <div class="lwrap">
+    <h1>Our Monthly Ledger</h1>
+    <p class="sub" style="margin:0;color:var(--muted)">Who is adding expenses?</p>
+    <div class="lgrid">
+      <button type="button" class="pbtn" data-p="anfal" style="--pc:var(--a)"><span class="av">A</span><b>Anfal</b><small id="lt-anfal"></small></button>
+      <button type="button" class="pbtn" data-p="mufeeda" style="--pc:var(--b)"><span class="av">M</span><b>Mufeeda</b><small id="lt-mufeeda"></small></button>
+    </div>
+    <p class="msg">Each person has a separate ledger. Expenses are never merged.</p>
+  </div>
+</div>
+
+<div class="wrap" id="app" hidden>
   <header class="top">
     <div>
       <h1>Our Monthly Ledger</h1>
-      <div class="sub">Dubai and Russia, one shared set of books. AED and RUB.</div>
+      <div class="sub" id="whoSub"></div>
     </div>
-    <div class="controls">
+    <div class="controls"><button type="button" class="btn ghost" id="switchBtn">Switch person</button>
       <div class="monthnav" role="group" aria-label="Month">
         <button type="button" id="prev" aria-label="Previous month">&#8249;</button>
         <div class="m" id="monthLabel"></div>
@@ -268,7 +289,7 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
     </div>
   </section>
 
-  <section class="two" aria-label="Settle up and budgets">
+  <section class="two" id="extraSec" aria-label="Settle up and budgets">
     <div class="card"><h2>Settle up</h2><div id="settle" style="margin-top:8px"></div><div class="msg" style="margin-top:10px">Assumes every expense this month is shared equally.</div></div>
     <div class="card"><h2>Category budgets</h2><div class="msg" id="budWarn"></div><div class="msg">Monthly limit in AED. Leave empty for no limit.</div><div id="budgets"></div></div>
   </section>
@@ -306,7 +327,7 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
 (function () {
   var CATS = ["Food & groceries", "Eating out", "Transport", "Rent & bills", "Health", "Shopping", "Flights & visits", "Gifts", "Other"];
   var $ = function (id) { return document.getElementById(id); };
-  var state = { mb: 0, budgets: {}, editId: null, q: "", shown: [], expenses: [], people: {}, rate: 23, month: ym(new Date()), disp: "AED", myId: null, canWrite: null, db: null, peopleLoaded: false, loaded: false, tab: "ledger", dl: null, who: "all" };
+  var state = { all: [], mbAll: {}, budAll: {}, person: null, mb: 0, budgets: {}, editId: null, q: "", shown: [], expenses: [], people: {}, rate: 23, month: ym(new Date()), disp: "AED", myId: null, canWrite: null, db: null, peopleLoaded: false, loaded: false, tab: "ledger", dl: null, who: "all" };
 
   function pad(n) { return (n < 10 ? "0" : "") + n; }
   function ym(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1); }
@@ -326,12 +347,15 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
   function toAed(e) { return e.currency === "RUB" ? e.amount / state.rate : e.amount; }
   function inDisp(aed) { return state.disp === "AED" ? aed : aed * state.rate; }
   function nameOf(id) {
+    if (PEOPLE[id]) return PEOPLE[id];
     var p = state.people[id];
     if (p && p.name) return p.name;
     for (var i = state.expenses.length - 1; i >= 0; i--) { if (state.expenses[i].by === id && state.expenses[i].byName) return state.expenses[i].byName; }
     return id === state.myId ? "You" : "Someone";
   }
   function personIds() {
+    if (state.person) return [state.person];
+    return [];
     var s = {};
     state.expenses.forEach(function (e) { if (e.by) s[e.by] = 1; });
     Object.keys(state.people).forEach(function (k) { s[k] = 1; });
@@ -339,6 +363,8 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
     return Object.keys(s).sort();
   }
   function colorVar(id) {
+    if (id === "mufeeda") return "var(--b)";
+    if (id === "anfal") return "var(--a)";
     var i = personIds().indexOf(id);
     return i === 0 ? "var(--a)" : i === 1 ? "var(--b)" : "var(--other)";
   }
@@ -499,7 +525,7 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
     $("readOnly").hidden = state.canWrite !== false;
     renderTabs();
     if (state.tab === "report") renderReport();
-    $("nameBox").hidden = !(state.db && state.myId && state.canWrite !== false);
+    $("nameBox").hidden = true;
     var mine = state.people[state.myId];
     if (mine && mine.name && document.activeElement !== $("myName") && !$("myName").value) $("myName").value = mine.name;
   }
@@ -537,12 +563,12 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
     if (!$("date").value) { msg.className = "msg err"; msg.textContent = "Pick a date."; return; }
     if (!state.db) { msg.className = "msg err"; msg.textContent = "Saving is not available in this view."; return; }
     if (state.editId) { saveEdit(amount, msg); return; }
-    var who = $("myName").value.trim();
+    var who = PEOPLE[state.person] || "";
     if (!who) { msg.className = "msg err"; msg.textContent = "Type your name first (for example Anfal or Mufeeda) so this expense is recorded under you."; $("myName").focus(); return; }
     var cur = document.querySelector('input[name="cur"]:checked').value;
     var data = {
       amount: Math.round(amount * 100) / 100, currency: cur, category: $("cat").value,
-      note: $("note").value.trim(), date: $("date").value, by: state.myId || "", byName: who, created: Date.now()
+      note: $("note").value.trim(), date: $("date").value, by: state.person, byName: PEOPLE[state.person], created: Date.now()
     };
     var known = state.people[state.myId];
     if (state.myId && (!known || known.name !== who)) state.db.doc("people/" + state.myId).set({ name: who }).catch(function () {});
@@ -794,9 +820,30 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
   $("clearForm").addEventListener("click", function () { endEdit(); $("formMsg").className = "msg"; $("amount").focus(); });
   $("mbInput").addEventListener("change", function () {
     var v = parseFloat($("mbInput").value);
-    if (state.db) state.db.doc("settings/monthly").set({ aed: isFinite(v) && v > 0 ? v : 0 }).catch(function (er) { showBanner(onErr(er)); });
+    if (state.db && state.person) { var all = Object.assign({}, state.mbAll); all[state.person] = isFinite(v) && v > 0 ? v : 0; state.db.doc("settings/monthly").set(all).catch(function (er) { showBanner(onErr(er)); }); }
     $("mbInput").blur();
   });
+  var PEOPLE = { anfal: "Anfal", mufeeda: "Mufeeda" };
+  function belongs(x, p) { return x.by === p || String(x.byName || "").trim().toLowerCase() === PEOPLE[p].toLowerCase(); }
+  function applyPerson() {
+    var p = state.person;
+    state.expenses = !p ? [] : state.all.filter(function (x) { return belongs(x, p); }).map(function (x) { return Object.assign({}, x, { by: p }); });
+  }
+  function renderLanding() {
+    var key = ym(new Date());
+    Object.keys(PEOPLE).forEach(function (p) {
+      var t = state.all.filter(function (x) { return belongs(x, p) && x.date && x.date.slice(0, 7) === key; }).reduce(function (a, x) { return a + toAed(x); }, 0);
+      $("lt-" + p).textContent = state.loaded ? "This month: " + fmt(t) + " AED" : "";
+    });
+  }
+  function showPerson(p) {
+    state.person = p; state.who = "all"; state.q = ""; state.tab = "ledger"; $("search").value = ""; endEdit();
+    $("landing").hidden = !!p; $("app").hidden = !p;
+    if (p) { $("whoSub").textContent = PEOPLE[p] + "\u2019s ledger. AED and RUB."; $("myName").value = PEOPLE[p]; window.scrollTo(0, 0); }
+    applyPerson(); render();
+  }
+  document.querySelectorAll(".pbtn").forEach(function (b) { b.addEventListener("click", function () { showPerson(b.getAttribute("data-p")); }); });
+  $("switchBtn").addEventListener("click", function () { showPerson(null); });
   var clearTimer = null;
   $("clearAll").addEventListener("click", function () {
     var list = (state.shown || []).slice(), b = $("clearAll");
@@ -828,10 +875,15 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
     var m = Object.assign({}, state.budgets);
     if (isFinite(v) && v > 0) m[c] = v; else delete m[c];
     var arr = Object.keys(m).map(function (k) { return { c: k, v: m[k] }; });
-    if (state.db) state.db.doc("settings/budgets").set({ list: arr }).catch(function (er) { showBanner(onErr(er)); });
+    if (state.db && state.person) { var all = Object.assign({}, state.budAll); all[state.person] = arr; state.db.doc("settings/budgets").set(all).catch(function (er) { showBanner(onErr(er)); }); }
   }
 
   function renderExtras(list) {
+    state.mb = state.mbAll[state.person] > 0 ? state.mbAll[state.person] : 0;
+    var bm = {}; (state.budAll[state.person] || []).forEach(function (x) { if (x && x.c && x.v > 0) bm[x.c] = x.v; });
+    state.budgets = bm;
+    $("settle").parentNode.hidden = true; $("extraSec").style.gridTemplateColumns = "minmax(0, 1fr)";
+    renderLanding();
     var mbi = $("mbInput");
     if (document.activeElement !== mbi) mbi.value = state.mb || "";
     mbi.disabled = state.canWrite === false || !state.db;
@@ -941,8 +993,9 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
 
     var timer = setTimeout(function () { if (!state.loaded) showBanner("The ledger is taking a while to load. What you see may be out of date."); }, 10000);
     db.collection("expenses").onSnapshot(function (snap) {
-      state.expenses = snap.docs.map(function (d) { var x = d.data() || {}; x.id = d.id; return x; })
+      state.all = snap.docs.map(function (d) { var x = d.data() || {}; x.id = d.id; return x; })
         .filter(function (x) { return typeof x.amount === "number" && x.date; });
+      applyPerson();
       if (!snap.metadata.fromCache) { state.loaded = true; clearTimeout(timer); if ($("banner").textContent.indexOf("taking a while") > -1) showBanner(""); }
       render();
     }, function (e) { clearTimeout(timer); showBanner("Could not read the ledger (" + ((e && e.code) || "error") + ")."); });
@@ -951,12 +1004,10 @@ input[type=search]{flex:1;min-width:160px;background:var(--bg);border:1px solid 
       state.people = m; state.peopleLoaded = true; render();
     }, function () { state.peopleLoaded = true; render(); });
     db.doc("settings/monthly").onSnapshot(function (snap) {
-      var d = snap.exists ? snap.data() : null; state.mb = d && d.aed > 0 ? d.aed : 0; render();
+      state.mbAll = snap.exists ? (snap.data() || {}) : {}; render();
     }, function () {});
     db.doc("settings/budgets").onSnapshot(function (snap) {
-      var d = snap.exists ? snap.data() : null, m = {};
-      ((d && d.list) || []).forEach(function (x) { if (x && x.c && x.v > 0) m[x.c] = x.v; });
-      state.budgets = m; render();
+      state.budAll = snap.exists ? (snap.data() || {}) : {}; render();
     }, function () {});
     db.doc("settings/rate").onSnapshot(function (snap) {
       var d = snap.exists ? snap.data() : null;
